@@ -31,6 +31,8 @@ class ClassificationRequest(BaseModel):
     context: Optional[Dict[str, Any]] = None
 
 class AnalyzeRequest(BaseModel):
+    user_id: UUID
+    session_id: Optional[str] = None
     user_query: str
     fits_file_id: Optional[str] = None
     context: Optional[Dict[str, Any]] = None
@@ -75,7 +77,9 @@ async def test_classify(
                 "confidence": result.confidence,
                 "question_category": result.question_category,
                 "complexity_level": result.complexity_level,
-                "reasoning": result.reasoning
+                "reasoning": result.reasoning,
+                "is_mixed_request": result.is_mixed_request,
+                "astrosage_required": result.astrosage_required
             },
             "parameters": result.parameters,
             "parameter_confidence": result.parameter_confidence,
@@ -113,10 +117,13 @@ async def submit_analysis(
 
     context = request.context or {}
 
-    # simulate data api from user (frontend)
+    # Generate session_id if null (new chat)
+    session_id = request.session_id or str(uuid4())
+    is_new_session = request.session_id is None
+
     user_request = UserRequest(
-        user_id = UUID('00000000-0000-0000-0000-000000000001'),
-        session_id = str(uuid4()),
+        user_id = request.user_id,
+        session_id = session_id,
         request_id = str(uuid4()),
         fits_file_id = request.fits_file_id,
         user_query = request.user_query,
@@ -129,8 +136,12 @@ async def submit_analysis(
         return {
             "success": True,
             "task_id": task_id,
+            "user_id": str(user_request.user_id),
+            "session_id": user_request.session_id,
+            "is_new_session": is_new_session,
             "status": "submitted",
-            "message": "Request submitted successfully for processing."
+            "message": "Request submitted successfully for processing.",
+            "check_status_url": f"/api/v1/analyze/{task_id}"
         }
 
     except Exception as e:

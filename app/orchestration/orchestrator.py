@@ -108,7 +108,7 @@ class DynamicWorkflowOrchestrator:
             'current_step': None,
             'completed_steps': [],
             'progress': '0%',
-            'created_at': datetime.utcnow(),
+            'created_at': datetime.now(),
             'completed_at': None,
             'error': None
         }
@@ -217,7 +217,7 @@ class DynamicWorkflowOrchestrator:
             logger.error(f"Workflow not found in memory: {task_id}")
             return
 
-        start_time = datetime.utcnow()
+        start_time = datetime.now()
 
         try:
             # ========================================
@@ -258,7 +258,7 @@ class DynamicWorkflowOrchestrator:
                     'parameters': classification_result.parameters,
                     'reasoning': classification_result.reasoning
                     },
-                'completed_at': datetime.utcnow().isoformat()
+                'completed_at': datetime.now().isoformat()
             })
             workflow['current_step'] = None
             workflow['progress'] = '30%'
@@ -269,12 +269,15 @@ class DynamicWorkflowOrchestrator:
             # ========================================
             if routing_strategy == 'astrosage':
                 # AstroSage only
+                print(f"Routing strategy: AstroSage only for task {task_id}")
                 workflow = await self._handle_astrosage(workflow, task_id)
             elif routing_strategy == 'analysis':
                 # Analysis only
+                print(f"Routing strategy: Analysis only for task {task_id}")
                 workflow = await self._handle_analysis(workflow, task_id)
             elif routing_strategy == 'mixed':
                 # Both Analysis and AstroSage
+                print(f"Routing strategy: Mixed (Analysis + AstroSage) for task {task_id}")
                 workflow = await self._handle_analysis(workflow, task_id)
                 workflow = await self._handle_astrosage(workflow, task_id)
             else:
@@ -305,7 +308,7 @@ class DynamicWorkflowOrchestrator:
             workflow['completed_steps'].append({
                 'step': 'rewrite',
                 'result': final_response,
-                'completed_at': datetime.utcnow().isoformat()
+                'completed_at': datetime.now().isoformat()
             })
 
             # ========================================
@@ -314,7 +317,7 @@ class DynamicWorkflowOrchestrator:
             workflow['current_step'] = None
             workflow['status'] = 'completed'
             workflow['progress'] = '100%'
-            workflow['completed_at'] = datetime.utcnow()
+            workflow['completed_at'] = datetime.now()
             await self._add_to_memory(task_id, workflow)
 
             logger.info(f"Workflow {task_id} completed in {(workflow['completed_at'] - start_time).total_seconds()} seconds.")
@@ -323,7 +326,7 @@ class DynamicWorkflowOrchestrator:
             logger.error(f"Error processing workflow {task_id}: {e}")
             workflow['status'] = 'failed'
             workflow['error'] = str(e)
-            workflow['completed_at'] = datetime.utcnow()
+            workflow['completed_at'] = datetime.now()
             await self._add_to_memory(task_id, workflow)
 
     async def _handle_analysis(self, workflow: dict, task_id: str) -> dict:

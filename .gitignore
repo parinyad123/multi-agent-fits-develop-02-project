@@ -1,5 +1,21 @@
-.env
 /venv
 
 __pycache__/
 *.pyc
+
+# Storage directories - keep structure but not files
+storage/fits_files/*
+!storage/fits_files/.gitkeep
+storage/plots/psd/*
+!storage/plots/psd/.gitkeep
+storage/plots/power_law/*
+!storage/plots/power_law/.gitkeep
+storage/plots/bending_power_law/*
+!storage/plots/bending_power_law/.gitkeep
+
+# Environment variables
+.env
+.env.local
+
+
+/storage

@@ -269,15 +269,15 @@ class DynamicWorkflowOrchestrator:
             # ========================================
             if routing_strategy == 'astrosage':
                 # AstroSage only
-                print(f"Routing strategy: AstroSage only for task {task_id}")
+                logger.info(f"Routing strategy: AstroSage only for task {task_id}")
                 workflow = await self._handle_astrosage(workflow, task_id)
             elif routing_strategy == 'analysis':
                 # Analysis only
-                print(f"Routing strategy: Analysis only for task {task_id}")
+                logger.info(f"Routing strategy: Analysis only for task {task_id}")
                 workflow = await self._handle_analysis(workflow, task_id)
             elif routing_strategy == 'mixed':
                 # Both Analysis and AstroSage
-                print(f"Routing strategy: Mixed (Analysis + AstroSage) for task {task_id}")
+                logger.info(f"Routing strategy: Mixed (Analysis + AstroSage) for task {task_id}")
                 workflow = await self._handle_analysis(workflow, task_id)
                 workflow = await self._handle_astrosage(workflow, task_id)
             else:

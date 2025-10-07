@@ -13,6 +13,7 @@ from app.agents.classification_parameter.unified_FITS_classification_parameter_a
     )
 
 from app.core.constants import AgentNames
+from app.core.config import settings
 
 # Setup logging
 logging.basicConfig(
@@ -30,6 +31,15 @@ async def lifespan(app: FastAPI):
 
     # STARTUP
     logging.info("Starting application...")
+
+    # Create necessary directories
+    logger.info("Ensuring storage directories exist...")
+    settings.ensure_directories()
+    logger.info(f"  FITS files: {settings.fits_path}")
+    logger.info(f"  Plots: {settings.plots_path}")
+    logger.info(f"  PSD plots: {settings.psd_plots_path}")
+    logger.info(f"  Power law plots: {settings.powerlaw_plots_path}")
+    logger.info(f"  Bending power law plots: {settings.bendingpowerlaw_plots_path}")
 
     # Initialize the orchestrator
     orchestrator = DynamicWorkflowOrchestrator()

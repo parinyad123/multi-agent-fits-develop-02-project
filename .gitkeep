@@ -1,0 +1,4 @@
+touch storage/fits_files/.gitkeep
+touch storage/plots/psd/.gitkeep
+touch storage/plots/power_law/.gitkeep
+touch storage/plots/bending_power_law/.gitkeep

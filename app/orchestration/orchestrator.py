@@ -21,7 +21,13 @@ from pydantic import BaseModel
 
 from app.agents.classification_parameter.unified_FITS_classification_parameter_agent import UnifiedFITSClassificationAgent
 
-from app.core.constants import AgentNames
+from app.core.constants import (
+    AgentNames,
+    RoutingStrategy,
+    WorkflowStatusType,
+    ResourceLimits,
+    ErrorMessages
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +46,10 @@ class UserRequest(BaseModel):
 
 class WorkflowStatus(BaseModel):
     task_id: str
-    status: str
-    routing_strategy: str | None # astrosage, analysis, mixed
-    current_step: str | None
-    completed_steps: List[Dict[str, Any]]
+    status: WorkflowStatusType
+    routing_strategy: RoutingStrategy | None = None # astrosage, analysis, mixed
+    current_step: str | None = None
+    completed_steps: List[Dict[str, Any]] = []
     progress: str
     created_at: datetime
     completed_at: datetime | None = None
@@ -62,10 +68,10 @@ class DynamicWorkflowOrchestrator:
     """
 
     # Resource limits
-    MAX_GPT_CONCURRENT = 3
-    MAX_ASTROSAGE_CONCURRENT = 1
-    MAX_WORKFLOW_MEMORY = 100  # Max number of workflows to keep in memory
-    MAX_WORKER_CONCURRENT = 20  # Max number of concurrent workflows
+    # MAX_GPT_CONCURRENT = 3
+    # MAX_ASTROSAGE_CONCURRENT = 1
+    # MAX_WORKFLOW_MEMORY = 100  # Max number of workflows to keep in memory
+    # MAX_WORKER_CONCURRENT = 20  # Max number of concurrent workflows
     
     def __init__(self):
 
@@ -74,8 +80,8 @@ class DynamicWorkflowOrchestrator:
 
         #  Resource semaphores
         #  IMPORtANT: Classification and Rewrite use GPT-4, so they share the same semaphore
-        self.shared_llm_semaphore = asyncio.Semaphore(self.MAX_GPT_CONCURRENT)
-        self.astrosage_semaphore = asyncio.Semaphore(self.MAX_ASTROSAGE_CONCURRENT)
+        self.shared_llm_semaphore = asyncio.Semaphore(ResourceLimits.MAX_GPT_CONCURRENT)
+        self.astrosage_semaphore = asyncio.Semaphore(ResourceLimits.MAX_ASTROSAGE_CONCURRENT)
 
 
         # Storage for workflow statuses 
@@ -86,6 +92,10 @@ class DynamicWorkflowOrchestrator:
         self.agents = {} # Will be registered later
 
     def register_agent(self, name: str, agent: Any):
+        """Resister an agent with validation"""
+        if not AgentNames.validate(name):
+            logger.warning(f"Registering agent with non-standard name: {name}")
+
         self.agents[name] = agent
         logger.info(f"Agent registered: {name}")
 
@@ -103,7 +113,7 @@ class DynamicWorkflowOrchestrator:
         workflow = {
             'task_id': task_id,
             'user_request': user_request,
-            'status': 'queued',
+            'status': WorkflowStatusType.QUEUED,
             'routing_strategy': None,
             'current_step': None,
             'completed_steps': [],
@@ -128,10 +138,13 @@ class DynamicWorkflowOrchestrator:
         async with self.workflow_lock:
 
             # Check if memory full
-            if len(self.workflow_results) >= self.MAX_WORKFLOW_MEMORY:
+            if len(self.workflow_results) >= ResourceLimits.MAX_WORKFLOW_MEMORY:
                 # Find older completed/failed workflow to remove
                 for old_id in list(self.workflow_results.keys()):   # use list to avoid RuntimeError
-                    if self.workflow_results[old_id]['status'] in ['completed', 'failed']:
+                    if self.workflow_results[old_id]['status'] in [
+                        WorkflowStatusType.COMPLETED,
+                        WorkflowStatusType.FAILED
+                    ]:
                         del self.workflow_results[old_id]
                         logger.info(f"Removed old workflow from memory: {old_id}")
                         break  # Remove only one
@@ -157,10 +170,10 @@ class DynamicWorkflowOrchestrator:
 
     async def start_workers(self, num_workers: int = 5):
         """Start worker tasks to process the main queue."""
-        workers = []
-        for i in range(num_workers):
-            worker = asyncio.create_task(self._worker(f"worker-{i+1}"))
-            workers.append(worker)
+        workers = [
+            asyncio.create_task(self._worker(f"worker-{i+1}"))
+            for i in range(num_workers)
+        ]
 
         # wait for all workers to finish (they won't, as they run indefinitely)
         await asyncio.gather(*workers)
@@ -168,7 +181,7 @@ class DynamicWorkflowOrchestrator:
     async def stop_workers(self):
         """Stop all workers gracefully."""
         # For now, just log - workers will stop when app shuts down
-        logger.info("Stopping workers is not implemented yet.")
+        logger.info("Stopping workers ...")
 
     async def _worker(self, worker_name: str):
         """
@@ -177,7 +190,6 @@ class DynamicWorkflowOrchestrator:
         logger.info(f"{worker_name} started.")
         
         while True:
-
             try: 
                 # Get task from main queue
                 task_id = await self.main_queue.get()
@@ -214,7 +226,7 @@ class DynamicWorkflowOrchestrator:
         workflow = await self._get_from_memory(task_id)
 
         if not workflow:
-            logger.error(f"Workflow not found in memory: {task_id}")
+            logger.error(ErrorMessages.WORKFLOW_NOT_FOUND.format(task_id))
             return
 
         start_time = datetime.now()
@@ -225,7 +237,7 @@ class DynamicWorkflowOrchestrator:
             # ========================================
 
             # Update status to in_progress
-            workflow['status'] = 'in_progress'
+            workflow['status'] = WorkflowStatusType.IN_PROGRESS
             workflow['current_step'] = 'classification'
             workflow['progress'] = '10%'
             await self._add_to_memory(task_id, workflow)
@@ -234,7 +246,7 @@ class DynamicWorkflowOrchestrator:
             # classification_agent: UnifiedFITSClassificationParameterAgent = self.agent.get('classification_parameter_agent')
             classification_agent = self.agents.get(AgentNames.CLASSIFICATION)
             if not classification_agent:
-                raise ValueError("Classification Parameter Agent not registered.")
+                raise ValueError(ErrorMessages.AGENT_NOT_FOUND.format(AgentNames.CLASSIFICATION))
 
             # Run classification with shared LLM semaphore
             async with self.shared_llm_semaphore:
@@ -244,7 +256,7 @@ class DynamicWorkflowOrchestrator:
                 )
 
             # Extract routing strategy and record result
-            routing_strategy = classification_result.routing_strategy
+            routing_strategy = RoutingStrategy(classification_result.routing_strategy)
             workflow['routing_strategy'] = routing_strategy
             workflow['completed_steps'].append({
                 'step': 'classification',
@@ -260,30 +272,25 @@ class DynamicWorkflowOrchestrator:
                     },
                 'completed_at': datetime.now().isoformat()
             })
-            workflow['current_step'] = None
+            # workflow['current_step'] = None
             workflow['progress'] = '30%'
             await self._add_to_memory(task_id, workflow)
 
             # ========================================
             # STEP 2: ROUTING BASED ON STRATEGY
             # ========================================
-            if routing_strategy == 'astrosage':
-                # AstroSage only
+            if routing_strategy == RoutingStrategy.ASTROSAGE:
                 logger.info(f"Routing strategy: AstroSage only for task {task_id}")
                 workflow = await self._handle_astrosage(workflow, task_id)
-            elif routing_strategy == 'analysis':
-                # Analysis only
+            elif routing_strategy == RoutingStrategy.ANALYSIS:
                 logger.info(f"Routing strategy: Analysis only for task {task_id}")
                 workflow = await self._handle_analysis(workflow, task_id)
-            elif routing_strategy == 'mixed':
-                # Both Analysis and AstroSage
-                logger.info(f"Routing strategy: Mixed (Analysis + AstroSage) for task {task_id}")
+            elif routing_strategy == RoutingStrategy.MIXED:
+                logger.info(f"Routing strategy: Mixed for task {task_id}")
                 workflow = await self._handle_analysis(workflow, task_id)
                 workflow = await self._handle_astrosage(workflow, task_id)
             else:
-                raise ValueError(f"Unknown routing strategy: {routing_strategy}")
-
-                # workflow = await self._handle_unsucess_intent_classification(workflow, task_id, classification_result)
+                raise ValueError(ErrorMessages.INVALID_ROUTING_STRATEGY.format(routing_strategy))
                 
             # ========================================
             # STEP 3: REWRITE AGENT (FINAL RESPONSE)
@@ -296,10 +303,10 @@ class DynamicWorkflowOrchestrator:
 
             rewrite_agent = self.agents.get(AgentNames.REWRITE)
             if not rewrite_agent:
-                raise ValueError("Rewrite Agent not registered.")
+                raise ValueError(ErrorMessages.AGENT_NOT_FOUND.format(AgentNames.REWRITE))
 
             async with self.shared_llm_semaphore:
-                final_response = await rewrite_agents.rewrite_response(
+                final_response = await rewrite_agent.rewrite_response(
                     user_input=workflow['user_request'].user_query,
                     context=workflow['user_request'].context,
                     intermediate_results=workflow['completed_steps']
@@ -314,17 +321,18 @@ class DynamicWorkflowOrchestrator:
             # ========================================
             # COMPLETE WORKFLOW
             # ========================================
-            workflow['current_step'] = None
-            workflow['status'] = 'completed'
+            # workflow['current_step'] = None
+            workflow['status'] = WorkflowStatusType.COMPLETED
             workflow['progress'] = '100%'
             workflow['completed_at'] = datetime.now()
             await self._add_to_memory(task_id, workflow)
 
-            logger.info(f"Workflow {task_id} completed in {(workflow['completed_at'] - start_time).total_seconds()} seconds.")
+            duration = (workflow['completed_at'] - start_time).total_seconds()
+            logger.info(f"Workflow {task_id} completed in {duration:.2f}s.")
 
         except Exception as e:
             logger.error(f"Error processing workflow {task_id}: {e}")
-            workflow['status'] = 'failed'
+            workflow['status'] = WorkflowStatusType.FAILED
             workflow['error'] = str(e)
             workflow['completed_at'] = datetime.now()
             await self._add_to_memory(task_id, workflow)

@@ -21,7 +21,15 @@ class Settings(BaseSettings):
     plots_bendingpowerlaw_dir: str = "storage/plots/bending_power_law"
 
     # Upload limits
-    max_upload_size: int = 536870912  # 500MB
+    max_upload_size: int = 536_870_912    # 500MB
+
+    # Database settings
+    database_url = "postgresql+asyncpg://fits_user:fits_password@localhost:5432"
+    database_echo: bool = False  # Set to True for SQL debugging
+    database_pool_size: int = 20
+    database_max_overflow: int = 10
+    database_pool_recycle: int = 3600  # Recycle connections after 1 hour
+    database_pool_pre_ping: bool = True  # Verify connections before using
 
     model_config = SettingsConfigDict(
         env_file='.env',

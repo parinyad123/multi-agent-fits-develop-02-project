@@ -1,0 +1,49 @@
+# docker-compose.yml
+
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: fits-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fits_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fits_password}
+      POSTGRES_DB: ${POSTGRES_DB:-fits_analysis_db}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fits_user} -d ${POSTGRES_DB:-fits_analysis_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - fits-network
+
+  # Optional: pgAdmin
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: fits-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@fits.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    networks:
+      - fits-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  fits-network:
+    driver: bridge

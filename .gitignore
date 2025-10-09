@@ -19,3 +19,5 @@ storage/plots/bending_power_law/*
 
 
 /storage
+
+/.mypy_cache

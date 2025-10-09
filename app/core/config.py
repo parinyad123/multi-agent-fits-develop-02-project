@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     max_upload_size: int = 536_870_912    # 500MB
 
     # Database settings
-    database_url = "postgresql+asyncpg://fits_user:fits_password@localhost:5432"
+    database_url: str = "postgresql+asyncpg://fits_user:fits_password@localhost:5432"
     database_echo: bool = False  # Set to True for SQL debugging
     database_pool_size: int = 20
     database_max_overflow: int = 10
@@ -34,7 +34,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file='.env',
         env_file_encoding='utf-8',
-        case_sensitive=False
+        case_sensitive=False,
+        extra='ignore'
     )
 
     @property

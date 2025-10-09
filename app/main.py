@@ -14,6 +14,7 @@ from app.agents.classification_parameter.unified_FITS_classification_parameter_a
 
 from app.core.constants import AgentNames
 from app.core.config import settings
+from app.db.base import init_db, close_db
 
 # Setup logging
 logging.basicConfig(
@@ -32,7 +33,16 @@ async def lifespan(app: FastAPI):
     # STARTUP
     logging.info("Starting application...")
 
-    # Create necessary directories
+    # Initialize database
+    logger.info("nitializing database...")
+    try:
+        await init_db()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        raise
+    
+    # Ensure storage directories exist
     logger.info("Ensuring storage directories exist...")
     settings.ensure_directories()
     logger.info(f"  FITS files: {settings.fits_path}")
@@ -64,6 +74,10 @@ async def lifespan(app: FastAPI):
     # SHUTDOWN
     logging.info("Shutting down application...")
     await orchestrator.stop_workers()
+
+    # Close database connections
+    await close_db()
+    logger.info("Application shutdown complete")
 
 
 app = FastAPI(
@@ -102,5 +116,6 @@ async def root():
 async def health_check():
     return {"status": "healthy",
             "orchestrator_status": "running" if orchestrator else "not running",
-            "orchestrator": orchestrator is not None
+            "orchestrator": orchestrator is not None,
+            "database_status": "connected"
             }

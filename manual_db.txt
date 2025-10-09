@@ -1,0 +1,79 @@
+======== files ที่เกี่ยวข้องกับ db ==========
+
+1. docker-compose.yml
+2. scripts/init_db.sql
+3. multi-agent-fits-dev-02/app/core/config.py
+4. .env
+5. multi-agent-fits-dev-02/app/db/__init__.py
+6. multi-agent-fits-dev-02/app/db/base.py
+7. multi-agent-fits-dev-02/app/db/models.py
+8. alembic/env.py
+9. alembic.ini
+10. multi-agent-fits-dev-02/app/main.py
+
+11. multi-agent-fits-dev-02/tests/test_database.py
+
+======== Start Everything =========
+# 1. Start PostgreSQL
+docker-compose up -d postgres
+
+# 2. Wait for PostgreSQL to be ready
+docker-compose logs -f postgres
+# Wait for "database system is ready to accept connections"
+
+# 3. Run migrations
+alembic upgrade head
+
+# 4. Start application
+python run.py
+
+========== Verify =============
+# Check PostgreSQL
+docker exec -it fits-postgres psql -U fits_user -d fits_analysis_db
+
+# Inside psql:
+\dt  # List tables
+\d users  # Describe users table
+\d fits_files  # Describe fits_files table
+
+SELECT * FROM users;
+SELECT * FROM fits_files;
+
+# Exit
+\q
+
+
+=========== เช็คสถานะ Container ได้ตลอดเวลา: ==========
+# เช็คว่ารันอยู่หรือไม่
+docker ps
+
+# เช็ค logs ล่าสุด
+docker logs fits-postgres --tail=20
+
+# เช็คว่า PostgreSQL พร้อมรึยัง
+docker exec fits-postgres pg_isready -U fits_user
+
+
+============== Useful Commands: ==============
+# Stop
+docker-compose stop postgres
+
+# Start
+docker-compose start postgres
+
+# Restart
+docker-compose restart postgres
+
+# View full logs
+docker-compose logs postgres
+
+# Follow logs (like tail -f)
+docker-compose logs -f postgres
+
+
+============= PostgreSQL Connection Diagnostic =========
+# ทำให้ execute ได้
+chmod +x check_db.sh
+
+# รัน
+./check_db.sh

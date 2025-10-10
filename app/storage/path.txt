@@ -1,4 +1,0 @@
-multi-agent-fits-dev-02/storage/fits_files
-multi-agent-fits-dev-02/storage/plots/psd
-multi-agent-fits-dev-02/storage/plots/power_law
-multi-agent-fits-dev-02/storage/plots/bending_power_law

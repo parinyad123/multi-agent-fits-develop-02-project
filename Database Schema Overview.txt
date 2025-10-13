@@ -1,0 +1,224 @@
+ระบบนี้ใช้ PostgreSQL และมี 6 tables หลัก ที่ออกแบบมาเพื่อรองรับ multi-user, multi-session analysis workflow:
+
+📊 Tables และ Relationships
+users (1) ──┬──> (N) fits_files
+            ├──> (N) sessions  
+            └──> (N) analysis_history
+
+fits_files (1) ──┬──> (N) file_sessions
+                 ├──> (N) analysis_history
+                 └──> (N) plot_files
+
+sessions (1) ──┬──> (N) file_sessions
+               └──> (N) analysis_history
+
+analysis_history (1) ──> (N) plot_files
+
+============ 1. users Table - User Management ============
+จัดการข้อมูลผู้ใช้และ preferences
+---------------------------------------------------------------------------
+Column          Type                    Description
+---------------------------------------------------------------------------
+user_id         UUID (PK)               Primary key, auto-generated
+username        String(100), unique     Username (optional)
+email           String(255), unique     Email address (optional)
+preferences     JSONB                   User preferences (JSON format)
+created_at      DateTime(TZ)            Account creation timestamp
+last_login_at   DateTime(TZ)            Last login timestamp
+---------------------------------------------------------------------------
+
+Indexes:
+
+idx_user_username on username
+idx_user_email on email
+
+Relationships:
+
+fits_files (1:N) - ไฟล์ที่ user อัปโหลด
+sessions (1:N) - sessions ของ user
+analyses (1:N) - analysis history ของ user
+
+
+============ 2. fits_files Table - FITS File Storage ============
+เก็บข้อมูล metadata ของ FITS files ที่ถูกอัปโหลด
+
+---------------------------------------------------------------------------
+Column              Type                    Description
+---------------------------------------------------------------------------
+file_id             UUID (PK)               Primary key, auto-generated
+user_id             UUID (FK)               → users.user_id, CASCADE DELETE
+original_filename   String(255)             ชื่อไฟล์ต้นฉบับ
+metadata_filename   String(255)             ชื่อจาก FITS header (optional)
+file_size           BigInteger              ขนาดไฟล์ (bytes), must be > 0
+storage_path        String(500), unique     Path บน filesystem
+is_valid            Boolean                 ไฟล์ valid หรือไม่
+validation_status   String(50)              'pending', 'valid', 'invalid', 'corrupted'
+validation_error    Text                    Error message ถ้า validation fail
+uploaded_at         DateTime(TZ)            เวลาที่อัปโหลด
+last_accessed_at    DateTime(TZ)            เวลาเข้าถึงล่าสุด (auto-update)
+fits_metadata       JSONB                   FITS header metadata
+data_info           JSONB                   ข้อมูล HDU structure, columns, etc.
+---------------------------------------------------------------------------
+
+Constraints:
+
+CHECK (file_size > 0)
+
+Indexes:
+
+idx_fits_user_id on user_id
+idx_fits_uploaded_at on uploaded_at
+idx_fits_last_accessed on last_accessed_at
+idx_fits_validation_status on validation_status
+idx_fits_is_valid on is_valid
+
+Relationships:
+
+user (N:1) - เจ้าของไฟล์
+file_sessions (1:N) - sessions ที่ใช้ไฟล์นี้
+analyses (1:N) - analysis ที่ทำกับไฟล์นี้
+plots (1:N) - plots ที่สร้างจากไฟล์นี้
+
+
+============ 3. sessions Table - Chat/Analysis Sessions ============
+เก็บ session context สำหรับแต่ละ chat/analysis page
+---------------------------------------------------------------------------
+Column              Type                Description
+---------------------------------------------------------------------------
+session_id          UUID (PK)           Primary key, auto-generated
+user_id             UUID (FK)           → users.user_id, CASCADE DELETE
+created_at          DateTime(TZ)        เวลาที่สร้าง session
+last_activity_at    DateTime(TZ)        เวลา activity ล่าสุด (auto-update)
+expires_at          DateTime(TZ)เวลาที่   session หมดอายุ
+is_active           Boolean             Session active หรือไม่
+current_file_id     UUID (FK)           → fits_files.file_id, SET NULL on delete
+session_metadata    JSONB               Context, conversation history, etc.
+---------------------------------------------------------------------------
+Indexes:
+
+idx_session_user_id on user_id
+idx_session_last_activity on last_activity_at
+idx_session_is_active on is_active
+
+Relationships:
+
+user (N:1) - เจ้าของ session
+current_file (N:1) - ไฟล์ที่กำลังทำงานด้วยอยู่
+file_sessions (1:N) - ไฟล์ทั้งหมดใน session
+analyses (1:N) - analysis ใน session นี้
+
+
+============ 4. file_sessions Table - Junction Table ============
+เชื่อม FITS files กับ sessions (Many-to-Many relationship)
+---------------------------------------------------------------------------
+Column              Type                Description
+---------------------------------------------------------------------------
+id                  Integer (PK)        Auto-increment primary key
+file_id             UUID (FK)           → fits_files.file_id, CASCADE DELETE
+session_id          UUID (FK)           → sessions.session_id, CASCADE DELETE
+added_atDate        Time(TZ)            เวลาที่เพิ่มไฟล์เข้า session
+last_used_at        DateTime(TZ)        เวลาที่ใช้ไฟล์ล่าสุด (auto-update)
+usage_count         Integer             จำนวนครั้งที่ใช้ไฟล์นี้ใน session
+is_primary          Boolean             ไฟล์หลักของ session หรือไม่
+analysis_context    JSONB               Context เฉพาะสำหรับไฟล์นี้ใน session
+---------------------------------------------------------------------------
+Indexes:
+
+idx_file_session_file_id on file_id
+idx_file_session_session_id on session_id
+idx_file_session_unique on (file_id, session_id) - UNIQUE constraint
+
+Relationships:
+
+fits_file (N:1) - ไฟล์ที่เชื่อม
+session (N:1) - session ที่เชื่อม
+
+
+============ 5. analysis_history Table - Analysis Results ============
+เก็บประวัติและผลลัพธ์ของการ analysis
+---------------------------------------------------------------------------
+Column                  Type            Description
+---------------------------------------------------------------------------
+analysis_id             UUID (PK)       Primary key, auto-generated
+file_id                 UUID (FK)       → fits_files.file_id, CASCADE DELETE
+session_id              UUID (FK)       → sessions.session_id, CASCADE DELETE
+user_id                 UUID (FK)       → users.user_id, CASCADE DELETE
+analysis_types          Array[String]   ['statistics', 'psd', 'power_law']
+parameters              JSONB           Parameters ที่ใช้ในการ analysis
+results                 JSONB           ผลลัพธ์การ analysis
+workflow_id             UUID            ID ของ workflow (from orchestrator)
+status                  String(50)      'pending', 'running', 'completed', 'failed'
+execution_time_seconds  BigInteger      เวลาที่ใช้ประมวลผล (วินาที)
+started_at              DateTime(TZ)    เวลาเริ่มต้น analysis
+completed_atDate        Time(TZ)        เวลาเสร็จสิ้น analysis
+---------------------------------------------------------------------------
+Indexes:
+
+idx_analysis_file_id on file_id
+idx_analysis_session_id on session_id
+idx_analysis_user_id on user_id
+idx_analysis_started_at on started_at
+idx_analysis_status on status
+
+Relationships:
+
+fits_file (N:1) - ไฟล์ที่วิเคราะห์
+session (N:1) - session ที่ทำการวิเคราะห์
+user (N:1) - ผู้ทำการวิเคราะห์
+plots (1:N) - plots ที่สร้างจากการวิเคราะห์นี้
+
+
+============ 6. plot_files Table - Generated Plots ============
+เก็บข้อมูล plots ที่สร้างจากการ analysis
+---------------------------------------------------------------------------
+Column          Type            Description
+---------------------------------------------------------------------------
+plot_id         UUID (PK)       Primary key, auto-generated
+analysis_id     UUID (FK)       → analysis_history.analysis_id, CASCADE DELETE
+file_id         UUID (FK)       → fits_files.file_id, CASCADE DELETE
+plot_type       String(50)      'psd', 'power_law', 'bending_power_law'
+storage_path    String(500)     Path บน filesystem
+plot_url        String(500)     URL สำหรับเข้าถึง plot
+plot_metadata   JSONB           Parameters, dimensions, etc.
+created_at      DateTime(TZ)    เวลาที่สร้าง plot
+---------------------------------------------------------------------------
+Indexes:
+
+idx_plot_analysis_id on analysis_id
+idx_plot_file_id on file_id
+idx_plot_type on plot_type
+
+Relationships:
+
+analysis (N:1) - analysis ที่สร้าง plot นี้
+fits_file (N:1) - ไฟล์ต้นทางของ plot
+
+
+================ Key Design Patterns ====================
+1. Cascade Deletes
+เมื่อลบ user → ลบ fits_files, sessions, analyses ทั้งหมด
+เมื่อลบ fits_file → ลบ analyses, plots ที่เกี่ยวข้อง
+เมื่อลบ session → ลบ analyses ใน session
+
+2. JSONB Columns
+ใช้ JSONB สำหรับ flexible data:
+
+preferences - user settings
+fits_metadata - FITS header data
+parameters - analysis parameters
+results - analysis results
+session_metadata - conversation context
+
+3. Timestamps & Tracking
+ทุก table มี timestamps สำหรับ:
+
+Creation time (created_at, uploaded_at)
+Last activity (last_activity_at, last_accessed_at)
+Auto-update on modification
+
+4. Performance Indexes
+Index บน foreign keys และ columns ที่ query บ่อย:
+
+User/session relationships
+File access patterns
+Analysis status queries

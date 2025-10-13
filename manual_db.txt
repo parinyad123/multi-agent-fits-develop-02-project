@@ -77,3 +77,105 @@ chmod +x check_db.sh
 
 # รัน
 ./check_db.sh
+
+============== Reset Database =============
+# Drop all tables
+docker exec -it fits-postgres psql -U fits_user -d fits_analysis_db -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+
+# Apply migration again
+alembic upgrade head
+
+============== Backup Database ==============
+# Backup
+docker exec fits-postgres pg_dump -U fits_user fits_analysis_db > backup.sql
+
+# Restore
+docker exec -i fits-postgres psql -U fits_user fits_analysis_db < backup.sql
+
+========== PostgreSQL พร้อมสมบูรณ์แล้ว! รันคำสั่งนี้เพื่อสร้างตาราง ===========
+alembic revision --autogenerate -m "Initial database schema"
+alembic upgrade head
+docker exec -it fits-postgres psql -U fits_user -d fits_analysis_db -c "\dt"
+
+========== Quick Reference ========================
+-----------------------------------------------------------------
+Task            |    Command
+-----------------------------------------------------------------
+เพิ่ม columnแก้    |    models.py → alembic revision --autogenerate
+เพิ่ม table       |    เพิ่ม class ใน models.py → alembic revision --autogenerate
+Apply changes   |    alembic upgrade head
+Rollback        |    alembic downgrade -1
+Check status    |    alembic current
+View history    |    alembic history
+Verify DB       |    \d table_name in psql
+-----------------------------------------------------------------
+
+
+
+============== pgadmin =================
+http://192.168.156.22:5051/
+
+1. เข้าใช้งาน pgAdmin
+เปิดเบราว์เซอร์: http://<IP-ของ-p100>:5051
+Login:
+
+Email: admin@example.com
+Password: admin
+
+2. เพิ่ม PostgreSQL Server ใน pgAdmin
+หลังจาก login แล้ว:
+
+คลิกขวาที่ "Servers" → Register → Server
+General Tab:
+
+Name: FITS Database
+
+Connection Tab:
+
+Host name/address: fits-postgres (ชื่อ container)
+Port: 5432
+Maintenance database: fits_analysis_db
+Username: fits_user
+Password: fits_password
+
+คลิก Save
+
+3. ทดสอบเชื่อมต่อจากเครื่องคุณ (Optional)
+หากต้องการเชื่อมต่อจาก pgAdmin บนเครื่องของคุณ:
+
+Host: <IP-ของ-p100>
+Port: 5433 (external port)
+Username: fits_user
+Password: fits_password
+Database: fits_analysis_db
+
+================ migration/init script ===============
+
+1. ตรวจสอบ Init Script
+bash# เช็คว่ามี init script ไหม
+ls -la scripts/
+
+# ดูเนื้อหา init script
+cat scripts/init_db.sql
+2. ถ้ามี Alembic Migration (แนะนำ)
+bash# เช็ค alembic config
+cat alembic.ini | grep sqlalchemy.url
+
+# ตรวจสอบ migrations
+ls -la alembic/versions/
+
+# รัน migrations
+source venv/bin/activate
+alembic upgrade head
+
+3. หรือรัน Application เพื่อสร้าง Tables
+bash# เช็คว่ามี script สำหรับสร้าง tables
+cat run.py
+
+# เช็ค app initialization
+cat app/__init__.py
+cat app/models.py  # ถ้ามี
+4. ตรวจสอบ Environment Variables
+bash# เช็คว่า app รู้จัก database connection string
+cat .env | grep -i database
+cat .env | grep -i postgres

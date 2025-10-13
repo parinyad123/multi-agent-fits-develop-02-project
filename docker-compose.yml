@@ -9,6 +9,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fits_password}
       POSTGRES_DB: ${POSTGRES_DB:-fits_analysis_db}
       POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+      POSTGRES_HOST_AUTH_METHOD: trust
+    command: ["postgres", "-c", "listen_addresses=*"]
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:

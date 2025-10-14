@@ -167,43 +167,64 @@ async def get_user_files(
 # DELETE /{file_id} - Delete file
 # ==========================================
 
-@router.delete("/{file_id}", response_model=FileDeleteResponse)
+# @router.delete("/{file_id}", response_model=FileDeleteResponse)
+# async def admin_hard_delete_file(
+#     file_id: UUID,
+#     session: AsyncSession = Depends(get_async_session)
+# ):
+#     """
+#     Delete a FITS file (manual deletion)
+    
+#     Args:
+#         file_id: File ID (UUID)
+        
+#     Returns:
+#         FileDeleteResponse confirming deletion
+        
+#     Raises:
+#         HTTPException 404: File not found
+#         HTTPException 500: Server error
+#     """
+#     try:
+#         success = await FileService.delete_file(file_id, session)
+        
+#         if not success:
+#             raise HTTPException(status_code=404, detail=f"File not found: {file_id}")
+        
+#         return FileDeleteResponse(
+#             success=True,
+#             file_id=file_id,
+#             message="File deleted successfully"
+#         )
+        
+#     except HTTPException:
+#         raise
+    
+#     except ValueError as e:
+#         logger.error(f"Error deleting file {file_id}: {e}")
+#         raise HTTPException(status_code=500, detail=str(e))
+    
+#     except Exception as e:
+#         logger.error(f"Unexpected error deleting file {file_id}: {e}")
+#         raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")
+
+# ==========================================
+# DELETE /soft_delete/{file_id} - Delete file
+# ==========================================
+@router.delete("/soft_delete/{file_id}", response_model=FileDeleteResponse)
 async def delete_file(
     file_id: UUID,
+    deleted_by: UUID = Query(..., description="User ID"),
     session: AsyncSession = Depends(get_async_session)
 ):
-    """
-    Delete a FITS file (manual deletion)
+    """ Soft delete file"""
+    success = await FileService.soft_delete_file(file_id, deleted_by, session)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="File not found")
     
-    Args:
-        file_id: File ID (UUID)
-        
-    Returns:
-        FileDeleteResponse confirming deletion
-        
-    Raises:
-        HTTPException 404: File not found
-        HTTPException 500: Server error
-    """
-    try:
-        success = await FileService.delete_file(file_id, session)
-        
-        if not success:
-            raise HTTPException(status_code=404, detail=f"File not found: {file_id}")
-        
-        return FileDeleteResponse(
-            success=True,
-            file_id=file_id,
-            message="File deleted successfully"
-        )
-        
-    except HTTPException:
-        raise
-    
-    except ValueError as e:
-        logger.error(f"Error deleting file {file_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    
-    except Exception as e:
-        logger.error(f"Unexpected error deleting file {file_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")
+    return FileDeleteResponse(
+        success=True,
+        file_id=file_id,
+        message="File delete successfully"
+    )

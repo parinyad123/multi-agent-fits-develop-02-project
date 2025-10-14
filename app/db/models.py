@@ -69,7 +69,12 @@ class FITSFile(Base):
     # Timestamps
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
     last_accessed_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    
+
+    # Soft Delete 
+    is_deleted = Column(Boolean, default=False)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_by = Column(UUID(as_uuid=True), nullable=True)
+
     # Metadata (JSONB for flexibility)
     fits_metadata = Column(JSONB, default=dict)
     data_info = Column(JSONB, default=dict)
@@ -86,6 +91,7 @@ class FITSFile(Base):
         Index("idx_fits_uploaded_at", "uploaded_at"),
         Index("idx_fits_last_accessed", "last_accessed_at"),
         Index("idx_fits_validation_status", "validation_status"),
+        Index("idx_fits_is_deleted", "is_deleted"),
         Index("idx_fits_is_valid", "is_valid"),
         CheckConstraint("file_size > 0", name="check_file_size_positive"),
     )

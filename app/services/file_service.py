@@ -145,7 +145,10 @@ class FileService:
         """Get file information by ID"""
         
         result = await session.execute(
-            select(FITSFile).where(FITSFile.file_id == file_id)
+            select(FITSFile).where(
+                FITSFile.file_id == file_id,
+                FITSFile.is_deleted == False
+                )
         )
         file = result.scalar_one_or_none()
         
@@ -167,46 +170,49 @@ class FileService:
         
         result = await session.execute(
             select(FITSFile)
-            .where(FITSFile.user_id == user_id)
+            .where(
+                FITSFile.user_id == user_id,
+                FITSFile.is_deleted == False
+                )
             .order_by(FITSFile.uploaded_at.desc())
             .offset(skip)
             .limit(limit)
         )
         return result.scalars().all()
 
-    @staticmethod
-    async def delete_file(
-        file_id: UUID,
-        session: AsyncSession
-    ) -> bool:
-        """
-        Delete file from database and filesystem
+    # @staticmethod
+    # async def admin_hard_delete_file(
+    #     file_id: UUID,
+    #     session: AsyncSession
+    # ) -> bool:
+    #     """
+    #     Delete file from database and filesystem
         
-        Returns:
-            True if successful, False if file not found
-        """
+    #     Returns:
+    #         True if successful, False if file not found
+    #     """
         
-        # Get file from database
-        file = await FileService.get_file_by_id(file_id, session)
+    #     # Get file from database
+    #     file = await FileService.get_file_by_id(file_id, session)
         
-        if not file:
-            return False
+    #     if not file:
+    #         return False
 
-        try:
-            # Delete from filesystem
-            FileManager.delete_fits_file(str(file_id))
+    #     try:
+    #         # Delete from filesystem
+    #         FileManager.delete_fits_file(str(file_id))
             
-            # Delete from database
-            await session.delete(file)
-            await session.commit()
+    #         # Delete from database
+    #         await session.delete(file)
+    #         await session.commit()
             
-            logger.info(f"File deleted: {file_id}")
-            return True
+    #         logger.info(f"File deleted: {file_id}")
+    #         return True
             
-        except Exception as e:
-            logger.error(f"Error deleting file {file_id}: {e}")
-            await session.rollback()
-            raise ValueError(f"Failed to delete file: {str(e)}")
+    #     except Exception as e:
+    #         logger.error(f"Error deleting file {file_id}: {e}")
+    #         await session.rollback()
+    #         raise ValueError(f"Failed to delete file: {str(e)}")
 
     @staticmethod
     async def ensure_user_exists(
@@ -234,3 +240,34 @@ class FileService:
             logger.info(f"Created new user: {user_id}")
             
         return user
+
+    @staticmethod
+    async def soft_delete_file(
+        file_id: UUID,
+        deleted_by_user_id: UUID,
+        session: AsyncSession
+    ) -> bool:
+        """
+        Soft delete: delete only fits file into storage, but keep metedata
+        """
+
+        # Find fits file
+        result = await session.execute(
+            select(FITSFile).where(FITSFile.file_id == file_id)
+        )
+        file = result.scalar_one_or_none()
+
+        if not file:
+            return False
+        
+        # Delete fits file from storage/fits_file directory
+        FileManager.delete_fits_file(str(file_id))
+
+        # Mark deleted into DB
+        file.is_deleted = True
+        file.deleted_at = datetime.now()
+        file.deleted_by = deleted_by_user_id
+
+        await session.commit()
+        return True
+    

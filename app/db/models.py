@@ -107,7 +107,8 @@ class FITSFile(Base):
 class Session(Base):
     __tablename__ = "sessions"
     
-    session_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    # session_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    session_id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     
     # Session info
@@ -146,8 +147,9 @@ class FileSession(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     file_id = Column(UUID(as_uuid=True), ForeignKey("fits_files.file_id", ondelete="CASCADE"), nullable=False)
-    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
-    
+    # session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    session_id = Column(String(255), ForeignKey("sessions.session_id", ondelete="CASCADE"))
+
     # Usage tracking
     added_at = Column(DateTime(timezone=True), server_default=func.now())
     last_used_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -181,7 +183,8 @@ class AnalysisHistory(Base):
     
     analysis_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     file_id = Column(UUID(as_uuid=True), ForeignKey("fits_files.file_id", ondelete="CASCADE"), nullable=False)
-    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    # session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    session_id = Column(String(255), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     
     # Analysis info

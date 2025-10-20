@@ -13,8 +13,8 @@ class AgentNames:
     """Agent identifiers for registration and routing"""
     CLASSIFICATION: Final[str] = "classification_parameter_agent"
     ANALYSIS: Final[str] = "analysis_agent"
-    ASTROSAGE = "astrosage_client"
-    REWRITE = "rewrite_agent"
+    ASTROSAGE: Final[str] = "astrosage_client"
+    REWRITE: Final[str] = "rewrite_agent"
 
     @classmethod
     def all(cls) -> list[str]:
@@ -61,6 +61,7 @@ class AnalysisType(str, Enum):
     PSD = "psd"
     POWER_LAW = "power_law"
     BENDING_POWER_LAW = "bending_power_law"
+    METADATA = "metadata"
     VALIDATION = "validation"
 
 # ==================================
@@ -73,7 +74,7 @@ class AnalysisType(str, Enum):
 # ==================================
 # Model Names
 # ==================================
-class plotType(str, Enum):
+class PlotType(str, Enum):
     """Types of generated plots"""
     PSD = "psd"
     POWER_LAW = "power_law"
@@ -86,8 +87,8 @@ class ModelNames:
     """LLM model identifiers"""
     GPT4: Final[str] = "gtp-4"
     GPT35_TURBO: Final[str] = "gpt-3.5-turbo"
-    ASTROSAGE_LLAMA31_8B = "AstroSage-Llama-3.1-8B"
-    ASTROSAGE_LLAMA31_70B = "AstroSage-Llama-3.1-70B"
+    ASTROSAGE_LLAMA31_8B: Final[str] = "AstroSage-Llama-3.1-8B"
+    ASTROSAGE_LLAMA31_70B: Final[str] = "AstroSage-Llama-3.1-70B"
 
 # ==================================
 # API Pesponse Codes
@@ -103,7 +104,7 @@ class ResponseCode:
     NOT_FOUND: Final[int] = 404
     CONFLICT: Final[int] = 409
     INTERNAL_ERROR: Final[int] = 500
-    SERVICE_UNAVAILABLE: Final[int] = 50
+    SERVICE_UNAVAILABLE: Final[int] = 503
 
 # ==================================
 # Resource Limits
@@ -278,3 +279,30 @@ class TimeConstants:
     ...                 await asyncio.sleep(TimeConstants.RETRY_DELAY_SECONDS)
     ...     raise last_error  # After all retries failed
     """
+
+# ==================================
+# Analysis Result Status
+# ==================================
+
+class AnalysisStatus(str, Enum):
+    """Status of analysis execution"""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    PARTIAL = "partial"  # Some analyses succeeded, some failed
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+# ==================================
+# Parameter Source
+# ==================================
+
+class ParameterSource(str, Enum):
+    """Source of analysis parameters"""
+    USER_SPECIFIED = "user_specified"  # User explicitly provided
+    DEFAULTS_USED = "defaults_used"    # Using default values
+    INFERRED = "inferred"              # Inferred from context
+    MIXED = "mixed"                    # Combination of above
+    EXTRACT_ALL = "extract_all"       # For metadata extraction
+

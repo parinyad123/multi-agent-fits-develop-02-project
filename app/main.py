@@ -11,6 +11,7 @@ from app.orchestration.orchestrator import DynamicWorkflowOrchestrator
 from app.agents.classification_parameter.unified_FITS_classification_parameter_agent import (
     UnifiedFITSClassificationAgent
     )
+from app.agents.analysis.unified_analysis_agent import UnifiedAnalysisAgent
 
 from app.core.constants import AgentNames
 from app.core.config import settings
@@ -54,20 +55,32 @@ async def lifespan(app: FastAPI):
     # Initialize the orchestrator
     orchestrator = DynamicWorkflowOrchestrator()
 
-    # Register agents
+    # ========================================
+    # Register Classification Agent
+    # ========================================
     classification_agent = UnifiedFITSClassificationAgent(
         model_name="gpt-3.5-turbo",
         temperature=0.1
     )
-
     orchestrator.register_agent(AgentNames.CLASSIFICATION, classification_agent)
+    logger.info(f"Classification Agent registered")
+
+    # ========================================
+    # Register Analysis Agent
+    # ========================================
+    analysis_agent = UnifiedAnalysisAgent()
+    orchestrator.register_agent(AgentNames.ANALYSIS, analysis_agent)
+    logger.info("Analysis Agent registered")
 
     # TODO: Add more agents as needed
+    # TODO: Add AstroSage Client when ready
+    # TODO: Add Rewrite Agent when ready
 
     # Strat workers
     import asyncio
     # Create a task to run workers in the background
     asyncio.create_task(orchestrator.start_workers(num_workers=3))
+    logger.info("Workers started")
 
     yield
 

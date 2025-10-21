@@ -57,187 +57,56 @@ class StatisticsCapability(AnalysisCapability):
         - percentile_50 = median = quantile_0.5
         - percentile_75 = quantile_0.75
         """
-        # self.logger.info(f"Executing statistics analysis with {len(rate_data)} data points, {type(rate_data)}")
-        # ========================================
-        # STEP 1: CRITICAL TYPE VALIDATION
-        # ========================================
-        self.logger.info(f"Starting statistics analysis")
-        self.logger.debug(f"Received rate_data type: {type(rate_data)}")
-        self.logger.debug(f"Received rate_data value: {rate_data}")
+        self.logger.info(f"Executing statistics analysis with {rate_data.size} data points")
 
-        # Check if rate_data is None
-        if rate_data is None:
-            error_msg = "rate_data is None"
-            self.logger.error(error_msg)
-            raise ValueError(error_msg)
         
-        # Check if rate_data is numpy array
-        if not isinstance(rate_data, np.ndarray):
-            error_msg = (
-                f"rate_data must be numpy.ndarray, got {type(rate_data)}. "
-                f"Value: {rate_data}"
-            )
-            self.logger.error(error_msg)
-            raise TypeError(error_msg)
-        
-        # Check if array is empty
-        if rate_data.size == 0:  # ← ใช้ .size แทน len() เพื่อความปลอดภัย
-            error_msg = f"rate_data is empty (size: {rate_data.size})"
-            self.logger.error(error_msg)
-            raise ValueError(error_msg)
-        
-        # Check array shape
-        if rate_data.ndim != 1:
-            error_msg = (
-                f"rate_data must be 1-dimensional, got {rate_data.ndim} dimensions. "
-                f"Shape: {rate_data.shape}"
-            )
-            self.logger.error(error_msg)
-            raise ValueError(error_msg)
-        
-        # Log successful validation
-        self.logger.info(
-            f"✓ Validation passed: "
-            f"type={type(rate_data).__name__}, "
-            f"shape={rate_data.shape}, "
-            f"size={rate_data.size}, "
-            f"dtype={rate_data.dtype}"
-        )
-        
-        # ========================================
-        # STEP 2: EXTRACT PARAMETERS
-        # ========================================
+        # Extract parameters
         metrics = parameters.get("metrics", ["mean", "median", "std", "min", "max", "count"])
         percentiles = parameters.get("percentiles", [])
         quantiles = parameters.get("quantiles", [])
 
-        self.logger.info(
-            f"Executing statistics: "
-            f"{len(metrics)} metrics, "
-            f"{len(percentiles)} percentiles, "
-            f"{len(quantiles)} quantiles"
-        )
-
-        # # validation
-        # if rate_data is None:
-        #     raise ValueError("rate_data cannot be None")
+        # Calculate basic statistics (no validation needed)
+        stats = calculate_statistics(rate_data, metrics)
         
-        # if len(rate_data) == 0:
-        #     raise ValueError("rate_data is empty")
-
-        # Calculate basic statistics
-        # stats = calculate_statistics(rate_data, metrics)
-
-        # ========================================
-        # STEP 3: CALCULATE BASIC STATISTICS
-        # ========================================
-        try:
-            stats = calculate_statistics(rate_data, metrics)
-            self.logger.debug(f"Basic statistics calculated: {list(stats.keys())}")
-        except Exception as e:
-            error_msg = f"Failed to calculate basic statistics: {str(e)}"
-            self.logger.error(error_msg, exc_info=True)
-            raise RuntimeError(error_msg) from e
-        
-        # ========================================
-        # STEP 4: CALCULATE PERCENTILES
-        # ========================================
+        # Calculate percentiles
         if percentiles:
             self.logger.info(f"Computing percentiles: {percentiles}")
-            percentile_results = {}
-            
-            try:
-                for p in percentiles:
-                    if not (0 <= p <= 100):
-                        self.logger.warning(f"Invalid percentile {p}, must be 0-100. Skipping.")
-                        continue
-                    
-                    value = float(np.percentile(rate_data, p))
-                    percentile_results[f"percentile_{p}"] = value
-                
-                stats.update(percentile_results)
-                self.logger.info(f"Percentiles computed: {list(percentile_results.keys())}")
-                
-            except Exception as e:
-                self.logger.error(f"Error computing percentiles: {e}", exc_info=True)
-                # Don't fail entirely, continue with what we have
-
-        # ========================================
-        # STEP 5: CALCULATE QUANTILES
-        # ========================================
+            for p in percentiles:
+                if 0 <= p <= 100:
+                    stats[f"percentile_{p}"] = float(np.percentile(rate_data, p))
+        
+        # Calculate quantiles
         if quantiles:
             self.logger.info(f"Computing quantiles: {quantiles}")
-            quantile_results = {}
-            
-            try:
-                for q in quantiles:
-                    if not (0 <= q <= 1):
-                        self.logger.warning(f"Invalid quantile {q}, must be 0-1. Skipping.")
-                        continue
-                    
-                    value = float(np.quantile(rate_data, q))
-                    # Format quantile key (e.g., 0.25 → quantile_0_25)
+            for q in quantiles:
+                if 0 <= q <= 1:
                     q_key = f"quantile_{str(q).replace('.', '_')}"
-                    quantile_results[q_key] = value
-                
-                stats.update(quantile_results)
-                self.logger.info(f"Quantiles computed: {list(quantile_results.keys())}")
-                
-            except Exception as e:
-                self.logger.error(f"Error computing quantiles: {e}", exc_info=True)
-                # Don't fail entirely, continue with what we have
+                    stats[q_key] = float(np.quantile(rate_data, q))
         
-        # ========================================
-        # STEP 6: ADD DISTRIBUTION SUMMARY
-        # ========================================
+        # Add distribution summary
         if percentiles or quantiles:
-            try:
-                stats["distribution_summary"] = self._create_distribution_summary(
-                    rate_data, stats
-                )
-                self.logger.debug("Distribution summary created")
-            except Exception as e:
-                self.logger.warning(f"Could not create distribution summary: {e}")
-                # Optional feature, don't fail
+            stats["distribution_summary"] = self._create_distribution_summary(rate_data, stats)
         
-        # ========================================
-        # STEP 7: PREPARE RESULT
-        # ========================================
         result = {
             "statistics": stats,
-            "n_data_points": int(rate_data.size),  # ← ใช้ .size แทน len()
-            "data_info": {
-                "dtype": str(rate_data.dtype),
-                "shape": list(rate_data.shape),
-                "memory_size_bytes": int(rate_data.nbytes)
-            },
+            "n_data_points": int(rate_data.size),
             "parameters_used": parameters
         }
         
-        self.logger.info(
-            f"Statistics completed successfully: "
-            f"{len(stats)} metrics computed "
-            f"(including {len(percentiles)} percentiles, {len(quantiles)} quantiles)"
-        )
+        self.logger.info(f"Statistics completed: {len(stats)} metrics")
         
-        return (result, None)  # No plot for statistics
+        return (result, None)
     
     def _create_distribution_summary(
         self, 
         rate_data: np.ndarray, 
         stats: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """
-        Create distribution summary from computed statistics
+        """Create distribution summary"""
         
-        Returns summary including:
-        - Range (min to max)
-        - IQR (Interquartile Range)
-        - Spread metrics
-        """
         summary = {}
         
-        # Data range
+        # Range
         if "min" in stats and "max" in stats:
             summary["range"] = {
                 "min": stats["min"],
@@ -245,45 +114,28 @@ class StatisticsCapability(AnalysisCapability):
                 "span": stats["max"] - stats["min"]
             }
         
-        # IQR (Interquartile Range) - if we have 25th and 75th percentiles
-        q25_key = None
-        q75_key = None
+        # IQR
+        q25_key = "percentile_25" if "percentile_25" in stats else "quantile_0_25"
+        q75_key = "percentile_75" if "percentile_75" in stats else "quantile_0_75"
         
-        # Check for percentile format
-        if "percentile_25" in stats:
-            q25_key = "percentile_25"
-        # Check for quantile format
-        elif "quantile_0_25" in stats:
-            q25_key = "quantile_0_25"
-        
-        if "percentile_75" in stats:
-            q75_key = "percentile_75"
-        elif "quantile_0_75" in stats:
-            q75_key = "quantile_0_75"
-        
-        if q25_key and q75_key:
-            q25 = stats[q25_key]
-            q75 = stats[q75_key]
+        if q25_key in stats and q75_key in stats:
+            q25, q75 = stats[q25_key], stats[q75_key]
             iqr = q75 - q25
-            
             summary["iqr"] = {
                 "q25": q25,
                 "q75": q75,
                 "iqr": iqr,
-                "lower_fence": q25 - 1.5 * iqr,  # Outlier detection
+                "lower_fence": q25 - 1.5 * iqr,
                 "upper_fence": q75 + 1.5 * iqr
             }
         
-        # Coefficient of variation (if mean and std available)
+        # Coefficient of variation
         if "mean" in stats and "std" in stats and stats["mean"] != 0:
             summary["coefficient_of_variation"] = stats["std"] / abs(stats["mean"])
         
         # Skewness and Kurtosis
-        try:
-            summary["skewness"] = float(scipy_stats.skew(rate_data))
-            summary["kurtosis"] = float(scipy_stats.kurtosis(rate_data))
-        except Exception as e:
-            self.logger.warning(f"Could not calculate skewness/kurtosis: {e}")
+        summary["skewness"] = float(scipy_stats.skew(rate_data))
+        summary["kurtosis"] = float(scipy_stats.kurtosis(rate_data))
         
         return summary
 
@@ -299,46 +151,21 @@ class PSDCapability(AnalysisCapability):
     
     async def execute(
         self, 
-        rate_data: np.ndarray, 
+        rate_data: np.ndarray,  # ✅ Pre-validated
         parameters: Dict[str, Any],
         **kwargs
     ) -> Tuple[Dict[str, Any], Optional[str]]:
-        """
-        Compute PSD and generate plot
+        """Compute PSD and generate plot"""
         
-        Parameters expected (with defaults from Classification Agent):
-        {
-            "low_freq": 1e-5,
-            "high_freq": 0.05,
-            "bins": 3500
-        }
-        """
-        # ========================================
-        # ADD VALIDATION (same as StatisticsCapability)
-        # ========================================
-        self.logger.info("Starting PSD computation")
-        self.logger.debug(f"Received rate_data type: {type(rate_data)}")
-        
-        if rate_data is None:
-            raise ValueError("rate_data is None")
-        
-        if not isinstance(rate_data, np.ndarray):
-            raise TypeError(f"rate_data must be numpy.ndarray, got {type(rate_data)}")
-        
-        if rate_data.size == 0:
-            raise ValueError(f"rate_data is empty")
-        
-        self.logger.info(f"✓ Validation passed: shape={rate_data.shape}, size={rate_data.size}")
+        self.logger.info(f"Computing PSD with {rate_data.size} data points")
         
         # Extract parameters
         low_freq = parameters.get("low_freq", 1e-5)
         high_freq = parameters.get("high_freq", 0.05)
         bins = parameters.get("bins", 3500)
         
-        # Compute PSD
+        # Compute PSD (no validation needed)
         freqs, psd = compute_psd(rate_data)
-        
-        # Bin PSD
         x, y = bin_psd(freqs, psd, low_freq, high_freq, bins)
         
         self.logger.info(f"PSD computed: {len(x)} frequency bins")
@@ -350,19 +177,15 @@ class PSDCapability(AnalysisCapability):
         # Save plot
         plot_id = str(uuid4())
         plot_bytes = self._fig_to_bytes(fig)
-        plot_path = FileManager.save_plot(plot_id, "psd", plot_bytes)
+        FileManager.save_plot(plot_id, "psd", plot_bytes)
         plot_url = f"/storage/plots/psd/psd_{plot_id}.png"
-        
         plt.close(fig)
         
-        self.logger.info(f"PSD plot saved: {plot_url}")
-        
-        # Prepare result (sample data to reduce response size)
         result = {
             "n_points": len(x),
             "freq_range": [float(x[0]), float(x[-1])],
             "psd_range": [float(np.min(y)), float(np.max(y))],
-            "frequencies_sample": x.tolist()[:100],  # First 100 points
+            "frequencies_sample": x.tolist()[:100],
             "psd_values_sample": y.tolist()[:100],
             "parameters_used": parameters
         }
@@ -370,7 +193,6 @@ class PSDCapability(AnalysisCapability):
         return (result, plot_url)
     
     def _fig_to_bytes(self, fig) -> bytes:
-        """Convert matplotlib figure to PNG bytes"""
         buf = io.BytesIO()
         fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
         buf.seek(0)

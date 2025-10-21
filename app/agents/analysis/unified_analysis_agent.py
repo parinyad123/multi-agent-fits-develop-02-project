@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 from typing import Dict, Any
 from uuid import UUID, uuid4
+import numpy as np
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -124,49 +125,45 @@ class UnifiedAnalysisAgent:
         # STEP 1: Load FITS file
         # ========================================
         try:
-            file_record, rate_data = await self._load_fits_file(
+            file_record, rate_data = await self._load_and_validate_fits_file(
                 request.file_id,
                 session
             )
-            self.logger.info(f"FITS file loaded: {len(rate_data)} data points")
+            
+            # ========================================
+            # CRITICAL: VALIDATE LOADED DATA
+            # ========================================
+            # self.logger.info(f"FITS file loaded successfully")
+            # self.logger.debug(f"rate_data type: {type(rate_data)}")
+            # self.logger.debug(f"rate_data is None: {rate_data is None}")
+            
+            # if rate_data is None:
+            #     raise ValueError("load_fits_data returned None")
+            
+            # if not isinstance(rate_data, np.ndarray):
+            #     raise TypeError(
+            #         f"load_fits_data returned wrong type: {type(rate_data)}, "
+            #         f"expected numpy.ndarray"
+            #     )
+            
+            # if rate_data.size == 0:
+            #     raise ValueError("load_fits_data returned empty array")
+            
+            # self.logger.info(
+            #     f"✓ Data validation passed: "
+            #     f"shape={rate_data.shape}, "
+            #     f"size={rate_data.size}, "
+            #     f"dtype={rate_data.dtype}"
+            # )
 
         except Exception as e:
-            self.logger.error(f"Failed to load FITS file: {e}")
+            self.logger.error(f"Failed to load FITS file: {e}", exc_info=True)
             return self._create_error_result(
                 request,
                 "file_loading_failed",
                 str(e),
                 start_time
             )
-        
-        # ========================================
-        # Ensure session exists before saving analysis
-        # ========================================
-
-        # try:
-        #     # Check if session exists
-        #     result = await session.execute(
-        #         select(SessionModel).where(SessionModel.session_id == request.session_id)
-        #     )
-        #     existing_session = result.scalar_one_or_none()
-
-        #     # If not exists, create it
-        #     if not existing_session:
-        #         self.logger.info("Creating session record: {request.session_id}")
-        #         new_session = SessionModel(
-        #         session_id=request.session_id,
-        #         user_id=request.user_id,
-        #         created_at=datetime.now(),
-        #         last_activity_at=datetime.now(),
-        #         is_active=True,
-        #         session_metadata={}
-        #     )
-        #     session.add(new_session)
-        #     await session.flush()  # Flush to make it available for FK
-        #     self.logger.info(f"Session created: {request.session_id}")
-
-        # except Exception as e:
-        #     self.logger.error(f"Failed to ensure session exists: {e}")
         
         # ========================================
         # STEP 2: Sequential execution of analyses
@@ -194,6 +191,28 @@ class UnifiedAnalysisAgent:
                 # Add filename to parameters for plot titles
                 params["filename"] = file_record.metadata_filename or file_record.original_filename
 
+                # ========================================
+                # CRITICAL: VERIFY DATA BEFORE PASSING
+                # ========================================
+                # self.logger.debug(
+                #     f"Before calling {analysis_type} capability: "
+                #     f"rate_data type={type(rate_data)}, "
+                #     f"is_none={rate_data is None}, "
+                #     f"shape={getattr(rate_data, 'shape', 'N/A')}"
+                # )
+                
+                # # Defensive check
+                # if rate_data is None:
+                #     raise RuntimeError(
+                #         f"rate_data became None before {analysis_type} execution"
+                #     )
+                
+                # if not isinstance(rate_data, np.ndarray):
+                #     raise RuntimeError(
+                #         f"rate_data type changed to {type(rate_data)} "
+                #         f"before {analysis_type} execution"
+                #     )
+
                 # Execute analysis
                 result, plot_url = await capability.execute(
                     rate_data = rate_data,
@@ -218,8 +237,8 @@ class UnifiedAnalysisAgent:
                 self.logger.info(f"{analysis_type}: completed successfully")
 
             except Exception as e:
-                # Log error but continus to next analysis
-                self.logger.error(f"{analysis_type} failed: {e}")
+                # Log error but continue to next analysis
+                self.logger.error(f"{analysis_type} failed: {e}", exc_info=True)
                 errors[analysis_type] = str(e)
                 failed.append(analysis_type)
 
@@ -250,7 +269,7 @@ class UnifiedAnalysisAgent:
             self.logger.info(f"Analysis saved to database: {analysis_id}")
         
         except Exception as e:
-            self.logger.error(f"Failed to save analysis to database: {e}")
+            self.logger.error(f"Failed to save analysis to database: {e}", exc_info=True)
             # Don't fail the entire analysis just because DB save failed
             analysis_id = uuid4()
 
@@ -290,19 +309,27 @@ class UnifiedAnalysisAgent:
         return analysis_result
 
 
-    async def _load_fits_file(self, file_id: UUID, session: AsyncSession) -> tuple:
+    async def _load_and_validate_fits_file(self, file_id: UUID, session: AsyncSession) -> tuple:
         """
-        Load FITS file from database and filesystem
+        Load FITS file from database and filesystem with comprehensive validation.
+        
+        This is the SINGLE POINT OF VALIDATION for all analysis workflows.
+        All capabilities can trust that rate_data is a valid np.ndarray.
 
-        Return: 
+        Returns: 
             Tuple of (file_record, rate_data)
+            
+        Raises:
+            FileNotFoundError: If file not found in database
+            ValueError: If file is invalid, deleted, or data is malformed
+            TypeError: If loaded data is wrong type
         """
 
-        # Quesry database
-        # Get file record from database
+        # ========================================
+        # STEP 1: Get file record from database
+        # ========================================
         file_record = await FileService.get_file_by_id(file_id, session)
         
-        # Validate
         if not file_record:
             raise FileNotFoundError(f"File not found: {file_id}")
         
@@ -312,8 +339,69 @@ class UnifiedAnalysisAgent:
         if file_record.is_deleted:
             raise ValueError(f"File has been deleted: {file_id}")
         
-        # Load actual FITS data filesystem
-        rate_data = load_fits_data(file_record.storage_path)
+        self.logger.info(f"Loading FITS data from: {file_record.storage_path}")
+        
+        # ========================================
+        # STEP 2: Load FITS data
+        # ========================================
+        try:
+            rate_data = load_fits_data(file_record.storage_path)
+        except Exception as e:
+            self.logger.error(f"Failed to load FITS data: {e}", exc_info=True)
+            raise ValueError(f"Failed to load FITS data: {str(e)}") from e
+        
+        # ========================================
+        # STEP 3: COMPREHENSIVE VALIDATION 
+        # ========================================
+        self.logger.debug(f"Validating loaded data: type={type(rate_data)}")
+        
+        # Check 1: Not None
+        if rate_data is None:
+            raise ValueError(
+                f"load_fits_data returned None for file {file_id}. "
+                f"File path: {file_record.storage_path}"
+            )
+        
+        # Check 2: Correct type
+        if not isinstance(rate_data, np.ndarray):
+            raise TypeError(
+                f"load_fits_data returned wrong type: {type(rate_data)}. "
+                f"Expected numpy.ndarray. File: {file_id}"
+            )
+        
+        # Check 3: Not empty
+        if rate_data.size == 0:
+            raise ValueError(
+                f"load_fits_data returned empty array for file {file_id}. "
+                f"File path: {file_record.storage_path}"
+            )
+        
+        # Check 4: 1-dimensional (expected for time series)
+        if rate_data.ndim != 1:
+            raise ValueError(
+                f"Expected 1-dimensional array, got {rate_data.ndim} dimensions. "
+                f"Shape: {rate_data.shape}, File: {file_id}"
+            )
+        
+        # Check 5: Valid dtype
+        if not np.issubdtype(rate_data.dtype, np.number):
+            raise TypeError(
+                f"Array has non-numeric dtype: {rate_data.dtype}. "
+                f"File: {file_id}"
+            )
+        
+        # ========================================
+        # VALIDATION PASSED
+        # ========================================
+        self.logger.info(
+            f" FITS data validated successfully: "
+            f"file_id={file_id}, "
+            f"shape={rate_data.shape}, "
+            f"size={rate_data.size}, "
+            f"dtype={rate_data.dtype}, "
+            f"min={rate_data.min():.6e}, "
+            f"max={rate_data.max():.6e}"
+        )
 
         return file_record, rate_data
     
@@ -388,8 +476,10 @@ class UnifiedAnalysisAgent:
         )
 
         session.add(analysis_record)
-        await session.commit()
-        await session.refresh(analysis_record)
+        # await session.commit()
+        # await session.refresh(analysis_record)
+
+        await session.flush()
         
         return analysis_record.analysis_id
 
@@ -417,7 +507,8 @@ class UnifiedAnalysisAgent:
             )
             session.add(plot_record)
         
-        await session.commit()
+        # await session.commit()
+        await session.flush()
 
     def _create_error_result(
             self, 

@@ -357,58 +357,40 @@ class DynamicWorkflowOrchestrator:
 
         
         try:
-            # ========================================
-            # STEP 0: Load Workflow (Database-backed)
-            # ========================================
             workflow = await self._get_from_memory(task_id)
-
             if not workflow:
                 logger.error(ErrorMessages.WORKFLOW_NOT_FOUND.format(task_id))
                 return
 
             start_time = datetime.now()
-
+            
             # ========================================
-            # STEP 1: Database Session
+            # STEP 1: Create ONE database session for entire workflow
             # ========================================
-            # async with self.db.get_session() as session:
             async with AsyncSessionLocal() as session:
                 
                 # ========================================
-                # STEP 2: Ensure Session Exists
+                # IMPORTANT: Store session in workflow context
                 # ========================================
-                # logger.info(f"Ensuring session exists for workflow {task_id}")
+                workflow['_db_session'] = session
                 
-                # try:
-                #     await self._ensure_session_exists(
-                #         session_id=workflow['session_id'],
-                #         user_id=workflow['user_id'],
-                #         db_session=session
-                #     )
-                # except Exception as e:
-                #     logger.error(f"Session management failed for {task_id}: {e}")
-                #     workflow['status'] = WorkflowStatusType.FAILED
-                #     workflow['error'] = f"Session error: {str(e)}"
-                #     workflow['completed_at'] = datetime.now().isoformat()
-                #     await self._add_to_memory(task_id, workflow)
-                #     return
-
-
+                # Extract user request data
                 user_request = workflow['user_request']
-            
-                # Extract session_id (handle both dict and object)
+                
                 if isinstance(user_request, dict):
                     session_id = user_request.get('session_id') or str(uuid4())
                     user_id = user_request.get('user_id')
                     user_query = user_request.get('user_query')
                     context = user_request.get('context', {})
                 else:
-                    # UserRequest object (Pydantic model)
                     session_id = user_request.session_id or str(uuid4())
                     user_id = user_request.user_id
                     user_query = user_request.user_query
                     context = user_request.context
                 
+                # ========================================
+                # STEP 2: Ensure Session Exists (ONCE)
+                # ========================================
                 logger.info(f"Ensuring session exists for workflow {task_id}")
                 
                 try:
@@ -424,42 +406,29 @@ class DynamicWorkflowOrchestrator:
                     workflow['completed_at'] = datetime.now()
                     await self._add_to_memory(task_id, workflow)
                     return
-
+                
                 # ========================================
                 # STEP 3: CLASSIFICATION AGENT
                 # ========================================
-
-                # Update status to in_progress
                 workflow['status'] = WorkflowStatusType.IN_PROGRESS
                 workflow['current_step'] = 'classification'
                 workflow['progress'] = '10%'
                 await self._add_to_memory(task_id, workflow)
 
-                # Classification Agent
-                # classification_agent: UnifiedFITSClassificationParameterAgent = self.agent.get('classification_parameter_agent')
                 classification_agent = self.agents.get(AgentNames.CLASSIFICATION)
                 if not classification_agent:
                     raise ValueError(ErrorMessages.AGENT_NOT_FOUND.format(AgentNames.CLASSIFICATION))
 
-                # Run classification with shared LLM semaphore
-                # async with self.shared_llm_semaphore:
-                #     classification_result = await classification_agent.process_request(
-                #         user_input=workflow['user_request'].user_query,
-                #         context=workflow['user_request'].context
-                #     )
-
                 async with self.shared_llm_semaphore:
                     classification_result = await classification_agent.process_request(
-                            user_input=user_query,  # ← ใช้ตัวแปรที่ extract แล้ว
-                            context=context          # ← ใช้ตัวแปรที่ extract แล้ว
-                        )
+                        user_input=user_query,
+                        context=context
+                    )
 
-                # Extract routing strategy and record result
                 routing_strategy = RoutingStrategy(classification_result.routing_strategy)
                 workflow['routing_strategy'] = routing_strategy
                 workflow['completed_steps'].append({
                     'step': 'classification',
-                    # 'result': classification_result
                     'classification_result': {
                         'primary_intent': classification_result.primary_intent,
                         'analysis_types': classification_result.analysis_types,
@@ -468,10 +437,9 @@ class DynamicWorkflowOrchestrator:
                         'confidence': classification_result.confidence,
                         'parameters': classification_result.parameters,
                         'reasoning': classification_result.reasoning
-                        },
+                    },
                     'completed_at': datetime.now().isoformat()
                 })
-                # workflow['current_step'] = None
                 workflow['progress'] = '30%'
                 await self._add_to_memory(task_id, workflow)
 
@@ -490,22 +458,17 @@ class DynamicWorkflowOrchestrator:
                     workflow = await self._handle_astrosage(workflow, task_id)
                 else:
                     raise ValueError(ErrorMessages.INVALID_ROUTING_STRATEGY.format(routing_strategy))
-                    
+                
                 # ========================================
-                # STEP 5: REWRITE AGENT (FINAL RESPONSE)
+                # STEP 5: REWRITE AGENT
                 # ========================================
-
-                # Step 3: Rewrite Agent
                 workflow['current_step'] = 'rewrite'
                 workflow['progress'] = '90%'
                 await self._add_to_memory(task_id, workflow)
 
                 rewrite_agent = self.agents.get(AgentNames.REWRITE)
-                if not rewrite_agent:
-                    raise ValueError(ErrorMessages.AGENT_NOT_FOUND.format(AgentNames.REWRITE))
                 
                 if not rewrite_agent:
-                    # Temporarily skip if Rewrite Agent not available
                     logger.warning(f"Rewrite Agent not available, skipping final rewrite")
                     workflow['completed_steps'].append({
                         'step': 'rewrite',
@@ -516,8 +479,8 @@ class DynamicWorkflowOrchestrator:
                 else:
                     async with self.shared_llm_semaphore:
                         final_response = await rewrite_agent.rewrite_response(
-                            user_input=workflow['user_request'].user_query,
-                            context=workflow['user_request'].context,
+                            user_input=user_query,
+                            context=context,
                             intermediate_results=workflow['completed_steps']
                         )
 
@@ -526,24 +489,37 @@ class DynamicWorkflowOrchestrator:
                         'result': final_response,
                         'completed_at': datetime.now().isoformat()
                     })
-
+                
                 # ========================================
-                # COMPLETE WORKFLOW
+                # STEP 6: COMMIT ALL CHANGES
                 # ========================================
-                # workflow['current_step'] = None
+                await session.commit()
+                
+                # ========================================
+                # STEP 7: COMPLETE WORKFLOW
+                # ========================================
                 workflow['status'] = WorkflowStatusType.COMPLETED
                 workflow['progress'] = '100%'
                 workflow['completed_at'] = datetime.now()
+                
+                # Clean up session reference
+                del workflow['_db_session']
+                
                 await self._add_to_memory(task_id, workflow)
 
                 duration = (workflow['completed_at'] - start_time).total_seconds()
                 logger.info(f"Workflow {task_id} completed in {duration:.2f}s.")
 
         except Exception as e:
-            logger.error(f"Error processing workflow {task_id}: {e}")
+            logger.error(f"Error processing workflow {task_id}: {e}", exc_info=True)
             workflow['status'] = WorkflowStatusType.FAILED
             workflow['error'] = str(e)
             workflow['completed_at'] = datetime.now()
+            
+            # Clean up session reference if exists
+            if '_db_session' in workflow:
+                del workflow['_db_session']
+            
             await self._add_to_memory(task_id, workflow)
 
     async def _handle_analysis(self, workflow: dict, task_id: str) -> dict:
@@ -587,30 +563,47 @@ class DynamicWorkflowOrchestrator:
             
             # Step 4: Create database session and call Analysis Agent
             logger.info(f"Calling Analysis Agent for task {task_id}")
+
+            # Get session from workflow context (passed from _process_workflow)
+            session = workflow.get('_db_session')
             
-            async with AsyncSessionLocal() as session:
-                try:
-                    # Call Analysis Agent
-                    analysis_result: AnalysisResult = await analysis_agent.process_request(
-                        request=analysis_request,
-                        session=session
-                    )
+            if not session:
+                raise RuntimeError(
+                    f"Database session not found in workflow for task {task_id}. "
+                    f"This should never happen - check _process_workflow implementation."
+                )
+            
+            # async with AsyncSessionLocal() as session:
+            #     try:
+
+                    # Ensure session exists FIRST
+                    # await self._ensure_session_exists(
+                    #     session_id=analysis_request.session_id,
+                    #     user_id=analysis_request.user_id,
+                    #     db_session=session  # Use SAME session
+                    # )
+
+                # Call Analysis Agent with SAME session
+            analysis_result: AnalysisResult = await analysis_agent.process_request(
+                request=analysis_request,
+                session=session # Pass SAME session
+            )
+                
+                # Commit database changes
+                # await session.commit()
+                
+            logger.info(
+                f"Analysis completed for task {task_id}: "
+                f"status={analysis_result.status}, "
+                f"completed={len(analysis_result.completed_analyses)}, "
+                f"failed={len(analysis_result.failed_analyses)}"
+            )
                     
-                    # Commit database changes
-                    await session.commit()
-                    
-                    logger.info(
-                        f"Analysis completed for task {task_id}: "
-                        f"status={analysis_result.status}, "
-                        f"completed={len(analysis_result.completed_analyses)}, "
-                        f"failed={len(analysis_result.failed_analyses)}"
-                    )
-                    
-                except Exception as e:
-                    # Rollback on error
-                    await session.rollback()
-                    logger.error(f"Database error during analysis for task {task_id}: {e}")
-                    raise
+                # except Exception as e:
+                #     # Rollback on error
+                #     await session.rollback()
+                #     logger.error(f"Database error during analysis for task {task_id}: {e}")
+                #     raise
             
             # Step 5: Record result in workflow
             workflow['completed_steps'].append({

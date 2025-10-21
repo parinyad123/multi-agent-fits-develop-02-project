@@ -34,32 +34,6 @@ def calculate_statistics(
         TypeError: If data is not a numpy array
         ValueError: If data is None or empty
     """
-
-    # ========================================
-    # CRITICAL VALIDATION
-    # ========================================
-    logger.debug(f"calculate_statistics called with data type: {type(data)}")
-    
-    # Check for None
-    if data is None:
-        error_msg = "Data cannot be None"
-        logger.error(error_msg)
-        raise ValueError(error_msg)
-    
-    # Check type
-    if not isinstance(data, np.ndarray):
-        error_msg = f"Data must be numpy.ndarray, got {type(data)}"
-        logger.error(error_msg)
-        raise TypeError(error_msg)
-    
-    # Check if empty
-    if data.size == 0:  # ← ใช้ .size แทน len()
-        error_msg = "Data array is empty"
-        logger.error(error_msg)
-        raise ValueError(error_msg)
-    
-    logger.debug(f"✓ Data validation passed: shape={data.shape}, size={data.size}, dtype={data.dtype}")
-
     # Initialize result dictionary
     stats: Dict[str, Any] = {}
 
@@ -111,10 +85,6 @@ def calculate_statistics(
     except Exception as e:
         logger.error(f"Error calculating basic statistics: {e}", exc_info=True)
         raise RuntimeError(f"Failed to calculate basic statistics: {str(e)}") from e
-
-    # ==========================================
-    # Percentiles
-    # ==========================================
 
     for metric in metrics:
         if metric.startswith("percentile_"):

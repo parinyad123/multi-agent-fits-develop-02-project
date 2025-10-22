@@ -148,8 +148,8 @@ class UnifiedFITSClassificationAgent:
             "analysis_type_distribution": {
                 "statistics": 0,
                 "psd": 0,
-                "fitting_power_law": 0,
-                "fitting_bending_power_law": 0,
+                "power_law": 0,
+                "bending_power_law": 0,
                 "metadata": 0
             },
             
@@ -205,7 +205,7 @@ class UnifiedFITSClassificationAgent:
                 }
             },
             
-            "fitting_power_law": {
+            "power_law": {
                 "parameters": {
                     "low_freq": {"type": "float", "default": 1e-5, "range": [1e-6, 0.1]},
                     "high_freq": {"type": "float", "default": 0.05, "range": [0.001, 0.5]},
@@ -227,7 +227,7 @@ class UnifiedFITSClassificationAgent:
                 }
             },
             
-            "fitting_bending_power_law": {
+            "bending_power_law": {
                 "parameters": {
                     "low_freq": {"type": "float", "default": 1e-5, "range": [1e-6, 0.1]},
                     "high_freq": {"type": "float", "default": 0.05, "range": [0.001, 0.5]},
@@ -538,7 +538,7 @@ class UnifiedFITSClassificationAgent:
             {{
                 "classification": {{
                     "primary_intent": "analysis|general|mixed",
-                    "analysis_types": ["statistics", "psd", "fitting_power_law", "fitting_bending_power_law", "metadata"],
+                    "analysis_types": ["statistics", "psd", "power_law", "bending_power_law", "metadata"],
                     "routing_strategy": "analysis|astrosage|mixed",
                     "confidence": 0.0-1.0,
                     "reasoning": "Clear explanation of classification decision",
@@ -552,14 +552,14 @@ class UnifiedFITSClassificationAgent:
                     "metadata": {{}},
                     "statistics": {{"metrics": ["mean", "std"]}},
                     "psd": {{"low_freq": 1e-5, "high_freq": 0.05, "bins": 3500}},
-                    "fitting_power_law": {{"A0": 1.0, "b0": 1.0, "noise_bound_percent": 0.7}},
-                    "fitting_bending_power_law": {{"A0": 10.0, "fb0": 0.01, "sh0": 1.0}}
+                    "power_law": {{"A0": 1.0, "b0": 1.0, "noise_bound_percent": 0.7}},
+                    "bending_power_law": {{"A0": 10.0, "fb0": 0.01, "sh0": 1.0}}
                 }},
                 "parameter_confidence": {{
                     "metadata": 1.0,
                     "statistics": 0.9,
                     "psd": 0.8,
-                    "fitting_power_law": 0.7
+                    "power_law": 0.7
                 }},
                 "parameter_source": {{
                     "metadata": "extract_all",
@@ -1345,9 +1345,9 @@ class UnifiedFITSClassificationAgent:
                 if fitting_type not in result.parameters:
                     result.parameters[fitting_type] = {}
                 
-                if fitting_type == "fitting_power_law":
+                if fitting_type == "power_law":
                     result.parameters[fitting_type]["A0"] = 1.0
-                elif fitting_type == "fitting_bending_power_law":
+                elif fitting_type == "bending_power_law":
                     result.parameters[fitting_type]["A0"] = 10.0
             
             explanation = "Used model-specific A0 defaults: power_law=1.0, bending=10.0 (optimized for each model)"
@@ -1367,9 +1367,9 @@ class UnifiedFITSClassificationAgent:
                     result.parameters[fitting_type]["A0"] = specified_value
                 else:
                     # Use model-specific default for unspecified
-                    if fitting_type == "fitting_power_law":
+                    if fitting_type == "power_law":
                         result.parameters[fitting_type]["A0"] = 1.0
-                    elif fitting_type == "fitting_bending_power_law":
+                    elif fitting_type == "bending_power_law":
                         result.parameters[fitting_type]["A0"] = 10.0
             
             explanation = f"A0={specified_value} applied to {specified_type}, others use model-specific defaults"
@@ -1385,9 +1385,9 @@ class UnifiedFITSClassificationAgent:
                     result.parameters[fitting_type]["A0"] = a0_values[fitting_type]
                 else:
                     # Use default for unspecified
-                    if fitting_type == "fitting_power_law":
+                    if fitting_type == "power_law":
                         result.parameters[fitting_type]["A0"] = 1.0
-                    elif fitting_type == "fitting_bending_power_law":
+                    elif fitting_type == "bending_power_law":
                         result.parameters[fitting_type]["A0"] = 10.0
             
             explanation = f"Model-specific A0 values applied: {a0_values}"
@@ -1454,7 +1454,7 @@ class UnifiedFITSClassificationAgent:
                         errors.append(f"{analysis_type}.{param_name} ({param_value}) outside valid range [{min_val}, {max_val}]")
         
         # Cross-parameter validation
-        if analysis_type in ["psd", "fitting_power_law", "fitting_bending_power_law"]:
+        if analysis_type in ["psd", "power_law", "bending_power_law"]:
             if "low_freq" in params and "high_freq" in params:
                 if params["low_freq"] >= params["high_freq"]:
                     errors.append(f"{analysis_type}: low_freq must be < high_freq")
@@ -1506,9 +1506,9 @@ class UnifiedFITSClassificationAgent:
             analysis_types.append("psd")
         if "fitting" in text_lower or "power law" in text_lower:
             if "bending" in text_lower:
-                analysis_types.append("fitting_bending_power_law")
+                analysis_types.append("bending_power_law")
             else:
-                analysis_types.append("fitting_power_law")
+                analysis_types.append("power_law")
         
         if not analysis_types and primary_intent == "analysis":
             analysis_types = ["statistics"]  # Safe default
@@ -1645,8 +1645,8 @@ class UnifiedFITSClassificationAgent:
             "analysis_types": {
                 "statistics": self.stats["analysis_types_distribution"]["statistics"],
                 "psd": self.stats["analysis_types_distribution"]["psd"],
-                "fitting_power_law": self.stats["analysis_types_distribution"]["fitting_power_law"],
-                "fitting_bending_power_law": self.stats["analysis_types_distribution"]["fitting_bending_power_law"],
+                "power_law": self.stats["analysis_types_distribution"]["power_law"],
+                "bending_power_law": self.stats["analysis_types_distribution"]["bending_power_law"],
                 "metadata": self.stats["analysis_types_distribution"]["metadata"],
                 "most_used": max(self.stats["analysis_types_distribution"].items(), key=lambda x: x[1])[0],
             },

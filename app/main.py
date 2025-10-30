@@ -12,6 +12,7 @@ from app.agents.classification_parameter.unified_FITS_classification_parameter_a
     UnifiedFITSClassificationAgent
     )
 from app.agents.analysis.unified_analysis_agent import UnifiedAnalysisAgent
+from app.services.astrosage import AstroSageClient
 
 from app.core.constants import AgentNames
 from app.core.config import settings
@@ -71,6 +72,13 @@ async def lifespan(app: FastAPI):
     analysis_agent = UnifiedAnalysisAgent()
     orchestrator.register_agent(AgentNames.ANALYSIS, analysis_agent)
     logger.info("Analysis Agent registered")
+
+    # ========================================
+    # Register AstroSage Client
+    # ========================================
+    astrosage_client = AstroSageClient()
+    orchestrator.register_agent(AgentNames.ASTROSAGE, astrosage_client)
+    logger.info("AstroSage Client registered")
 
     # TODO: Add more agents as needed
     # TODO: Add AstroSage Client when ready

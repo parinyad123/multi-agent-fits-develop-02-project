@@ -11,7 +11,6 @@ class Settings(BaseSettings):
 
     # API Keys
     openai_api_key: str
-    astrosage_base_url: str
 
     # Storage Directories paths (as strings from .env)
     fitsfiles_dir: str = "storage/fitsfiles"
@@ -37,6 +36,21 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra='ignore'
     )
+
+    # AstroSage Service
+    astrosage_base_url: str = "http://192.168.156.22:8080"
+    astrosage_model: str = "astrosage"
+    astrosage_timeout: int = 240  # seconds
+    astrosage_max_retries: int = 3
+    astrosage_retry_delay: int = 5  # seconds
+
+    # Conversation settings
+    conversation_history_limit: int = 10
+
+    # Default LLM parameters
+    astrosage_default_temperature: float = 0.2
+    astrosage_default_max_tokens: int = 600
+    astrosage_default_top_p: float = 0.95
 
     @property
     def project_root(self) -> Path:

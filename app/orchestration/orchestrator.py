@@ -29,6 +29,8 @@ from app.db.models import Session as SessionModel
 
 from app.agents.classification_parameter.unified_FITS_classification_parameter_agent import UnifiedFITSClassificationAgent
 
+from app.services.astrosage.models import AstroSageRequest
+
 from app.core.constants import (
     AgentNames,
     RoutingStrategy,
@@ -75,12 +77,6 @@ class DynamicWorkflowOrchestrator:
     3. mixed: Classification  → Analysis → AstroSage → Rewrite
     """
 
-    # Resource limits
-    # MAX_GPT_CONCURRENT = 3
-    # MAX_ASTROSAGE_CONCURRENT = 1
-    # MAX_WORKFLOW_MEMORY = 100  # Max number of workflows to keep in memory
-    # MAX_WORKER_CONCURRENT = 20  # Max number of concurrent workflows
-    
     def __init__(self):
 
         # Main queue for incoming user requests
@@ -697,12 +693,102 @@ class DynamicWorkflowOrchestrator:
     async def _handle_astrosage(self, workflow: dict, task_id: str) -> dict:
         """ 
         Handle AstroSage step in the workflow.
+
+        Process:
+        1. Get AstroSage client
+        2. Extract data from workflow
+        3. Build request
+        4. Call AstroSage
+        5. Save result to workflow
         """  
         workflow['current_step'] = 'astrosage'
         workflow['progress'] = '70%'
         await self._add_to_memory(task_id, workflow)
 
-        # TODO: Implement AstroSage handling logic
-        logger.info(f"AstroSage step placeholder for task {task_id}")
+        try:
+            # Get AstroSage client
+            astrosage_client = self.agents.get(AgentNames.ASTROSAGE)
+            if not astrosage_client:
+                raise ValueError(ErrorMessages.AGENT_NOT_FOUND.format(AgentNames.ASTROSAGE))
+            
+            # Extract user request data
+            user_request = workflow['user_request']
+            
+            # Handle both dict and object formats
+            if isinstance(user_request, dict):
+                user_query = user_request.get('user_query')
+                session_id = user_request.get('session_id')
+                user_id = user_request.get('user_id')
+            else:
+                user_query = user_request.user_query
+                session_id = user_request.session_id
+                user_id = user_request.user_id
+            
+            # Get analysis results if available
+            analysis_results = None
+            for step in workflow['completed_steps']:
+                if step['step'] == 'analysis':
+                    analysis_results = step.get('analysis_result', {}).get('results')
+                    break
+            
+            # Import required models
+            from app.services.astrosage.models import AstroSageRequest
+            
+            # Build AstroSage request
+            astrosage_request = AstroSageRequest(
+                user_id = user_id,
+                session_id = session_id,
+                user_query = user_query,
+                analysis_results = analysis_results
+            )
+            
+            # Get database session from workflow
+            db_session = workflow.get('_db_session')
+            if not db_session:
+                raise RuntimeError("Database session not found in workflow")
+            
+            # Call AstroSage with semaphore
+            logger.info(f"Calling AstroSage for task {task_id}")
+            async with self.astrosage_semaphore:
+                astrosage_response = await astrosage_client.query(
+                    request=astrosage_request,
+                    db_session=db_session
+                )
+                
+            # Record result
+            workflow['completed_steps'].append({
+                'step': 'astrosage',
+                'response': astrosage_response.content,
+                'response_id': str(astrosage_response.response_id),
+                'model_used': astrosage_response.model_used,
+                'tokens_used': astrosage_response.tokens_used,
+                'response_time': astrosage_response.response_time,
+                'success': astrosage_response.success,
+                'error': astrosage_response.error,
+                'completed_at': datetime.now().isoformat()
+            })
 
+            if astrosage_response.success:
+                logger.info(
+                    f"AstroSage completed for task {task_id}: "
+                    f"{astrosage_response.tokens_used} tokens, "
+                    f"{astrosage_response.response_time:.2f}s"
+                )
+            else:
+                logger.error(
+                    f"AstroSage failed for task {task_id}: "
+                    f"{astrosage_response.error}"
+                )
+            
+            workflow['progress'] = '85%'
+            await self._add_to_memory(task_id, workflow)
+
+        except Exception as e:
+            logger.error(f"Error in AstroSage step for task {task_id}: {e}", exc_info=True)
+            workflow['completed_steps'].append({
+                'step': 'astrosage',
+                'status': 'failed',
+                'error': str(e),
+                'completed_at': datetime.now().isoformat()
+            })
         return workflow

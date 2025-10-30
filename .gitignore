@@ -3,6 +3,12 @@
 __pycache__/
 *.pyc
 
+# file test
+manual_Analysis_Agent.txt
+scripts/add_soft_delete_columns.sql
+test_analysis_workflow.py
+test_astrosage.py
+
 # Storage directories - keep structure but not files
 storage/fits_files/*
 !storage/fits_files/.gitkeep
@@ -23,3 +29,5 @@ storage/plots/bending_power_law/*
 /.mypy_cache
 
 /guide
+
+/logs

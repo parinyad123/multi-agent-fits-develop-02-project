@@ -180,40 +180,6 @@ class FileService:
         )
         return result.scalars().all()
 
-    # @staticmethod
-    # async def admin_hard_delete_file(
-    #     file_id: UUID,
-    #     session: AsyncSession
-    # ) -> bool:
-    #     """
-    #     Delete file from database and filesystem
-        
-    #     Returns:
-    #         True if successful, False if file not found
-    #     """
-        
-    #     # Get file from database
-    #     file = await FileService.get_file_by_id(file_id, session)
-        
-    #     if not file:
-    #         return False
-
-    #     try:
-    #         # Delete from filesystem
-    #         FileManager.delete_fits_file(str(file_id))
-            
-    #         # Delete from database
-    #         await session.delete(file)
-    #         await session.commit()
-            
-    #         logger.info(f"File deleted: {file_id}")
-    #         return True
-            
-    #     except Exception as e:
-    #         logger.error(f"Error deleting file {file_id}: {e}")
-    #         await session.rollback()
-    #         raise ValueError(f"Failed to delete file: {str(e)}")
-
     @staticmethod
     async def ensure_user_exists(
         user_id: UUID,

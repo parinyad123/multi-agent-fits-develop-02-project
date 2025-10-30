@@ -130,32 +130,7 @@ class UnifiedAnalysisAgent:
                 session
             )
             
-            # ========================================
-            # CRITICAL: VALIDATE LOADED DATA
-            # ========================================
-            # self.logger.info(f"FITS file loaded successfully")
-            # self.logger.debug(f"rate_data type: {type(rate_data)}")
-            # self.logger.debug(f"rate_data is None: {rate_data is None}")
-            
-            # if rate_data is None:
-            #     raise ValueError("load_fits_data returned None")
-            
-            # if not isinstance(rate_data, np.ndarray):
-            #     raise TypeError(
-            #         f"load_fits_data returned wrong type: {type(rate_data)}, "
-            #         f"expected numpy.ndarray"
-            #     )
-            
-            # if rate_data.size == 0:
-            #     raise ValueError("load_fits_data returned empty array")
-            
-            # self.logger.info(
-            #     f"✓ Data validation passed: "
-            #     f"shape={rate_data.shape}, "
-            #     f"size={rate_data.size}, "
-            #     f"dtype={rate_data.dtype}"
-            # )
-
+           
         except Exception as e:
             self.logger.error(f"Failed to load FITS file: {e}", exc_info=True)
             return self._create_error_result(
@@ -191,27 +166,6 @@ class UnifiedAnalysisAgent:
                 # Add filename to parameters for plot titles
                 params["filename"] = file_record.metadata_filename or file_record.original_filename
 
-                # ========================================
-                # CRITICAL: VERIFY DATA BEFORE PASSING
-                # ========================================
-                # self.logger.debug(
-                #     f"Before calling {analysis_type} capability: "
-                #     f"rate_data type={type(rate_data)}, "
-                #     f"is_none={rate_data is None}, "
-                #     f"shape={getattr(rate_data, 'shape', 'N/A')}"
-                # )
-                
-                # # Defensive check
-                # if rate_data is None:
-                #     raise RuntimeError(
-                #         f"rate_data became None before {analysis_type} execution"
-                #     )
-                
-                # if not isinstance(rate_data, np.ndarray):
-                #     raise RuntimeError(
-                #         f"rate_data type changed to {type(rate_data)} "
-                #         f"before {analysis_type} execution"
-                #     )
 
                 # Execute analysis
                 result, plot_url = await capability.execute(

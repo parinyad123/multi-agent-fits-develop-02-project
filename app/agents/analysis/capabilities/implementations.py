@@ -258,58 +258,11 @@ class FittingCapability(AnalysisCapability):
             "maxfev": 1000000
         }
         """
-        # ========================================
-        # ADD VALIDATION
-        # ========================================
-        # self.logger.info(f"Starting {self.model_type} fitting")
-        # self.logger.debug(f"Received rate_data type: {type(rate_data)}")
-        
-        # if rate_data is None:
-        #     raise ValueError("rate_data is None")
-        
-        # if not isinstance(rate_data, np.ndarray):
-        #     raise TypeError(f"rate_data must be numpy.ndarray, got {type(rate_data)}")
-        
-        # if rate_data.size == 0:
-        #     raise ValueError(f"rate_data is empty")
-        
-        # self.logger.info(f"✓ Validation passed: shape={rate_data.shape}, size={rate_data.size}")
-        
-        # Compute PSD first (needed for fitting)
+
         low_freq = parameters.get("low_freq", 1e-5)
         high_freq = parameters.get("high_freq", 0.05)
         bins = parameters.get("bins", 3500)
         filename = parameters.get('filename', 'Unknown')
-        
-        # Compute PSD internally
-        # self.logger.debug("Computing PSD for fitting")
-        
-        # freqs, psd = compute_psd(rate_data)
-        # x, y = bin_psd(freqs, psd, low_freq, high_freq, bins)
-        
-        # # Fit model
-        # if self.model_type == "power_law":
-        #     fitted_params, fig = await self._fit_power_law(x, y, parameters)
-        # else:  # bending_power_law
-        #     fitted_params, fig = await self._fit_bending_power_law(x, y, parameters)
-        
-        # # Save plot
-        # plot_id = str(uuid4())
-        # plot_bytes = self._fig_to_bytes(fig)
-        # plot_path = FileManager.save_plot(plot_id, self.model_type, plot_bytes)
-        # plot_url = f"/storage/plots/{self.model_type}/{self.model_type}_{plot_id}.png"
-        
-        # plt.close(fig)
-        
-        # self.logger.info(f"{self.model_type} fitting completed: {plot_url}")
-        
-        # result = {
-        #     "model": self.model_type,
-        #     "fitted_parameters": fitted_params,
-        #     "parameters_used": parameters
-        # }
-        
-        # return (result, plot_url)
 
         try:
             freqs, psd = compute_psd(rate_data)
@@ -344,107 +297,6 @@ class FittingCapability(AnalysisCapability):
         else:
             raise ValueError(f"Unknown fitting type: {self.fitting_type}")
     
-    # async def _fit_power_law(self, x, y, parameters):
-    #     """Fit power law model"""
-    #     # Extract fitting parameters
-    #     noise_bound_percent = parameters.get("noise_bound_percent", 0.7)
-    #     A0 = parameters.get("A0", 1.0)
-    #     b0 = parameters.get("b0", 1.0)
-    #     A_min = parameters.get("A_min", 0.0)
-    #     A_max = parameters.get("A_max", 1e38)
-    #     b_min = parameters.get("b_min", 0.1)
-    #     b_max = parameters.get("b_max", 3.0)
-    #     maxfev = parameters.get("maxfev", 1000000)
-        
-    #     # Fit
-    #     A, b, n = fit_power_law(
-    #         x, y,
-    #         noise_bound_percent=noise_bound_percent,
-    #         initial_params={"A": A0, "b": b0},
-    #         param_bounds={
-    #             "A": (A_min, A_max),
-    #             "b": (b_min, b_max)
-    #         },
-    #         maxfev=maxfev
-    #     )
-        
-    #     # Generate plot
-    #     filename = parameters.get("filename", "FITS File")
-    #     fig = plot_power_law_with_residual_figure(
-    #         x, y, A, b, n, 
-    #         title=f"Power Law Fit - [{filename}]"
-    #     )
-        
-    #     fitted_params = {
-    #         "A": float(A),
-    #         "b": float(b),
-    #         "n": float(n)
-    #     }
-        
-    #     return fitted_params, fig
-    
-    # async def _fit_bending_power_law(self, x, y, parameters):
-    #     """Fit bending power law model"""
-    #     # Extract fitting parameters
-    #     noise_bound_percent = parameters.get("noise_bound_percent", 0.7)
-    #     A0 = parameters.get("A0", 10.0)
-    #     fb0 = parameters.get("fb0", 0.01)  
-    #     sh0 = parameters.get("sh0", 1.0)
-    #     A_min = parameters.get("A_min", 0.0)
-    #     A_max = parameters.get("A_max", 1e38)
-    #     fb_min = parameters.get("fb_min", 2e-5)
-    #     fb_max = parameters.get("fb_max", 0.05)
-    #     sh_min = parameters.get("sh_min", 0.3)
-    #     sh_max = parameters.get("sh_max", 3.0)
-    #     maxfev = parameters.get("maxfev", 1000000)
-        
-    #     # Build initial params
-    #     initial_params = {"A": A0, "sh": sh0}
-    #     if fb0 is not None:
-    #         initial_params["fb"] = fb0
-        
-    #     # Build param bounds
-    #     param_bounds = {
-    #         "A": (A_min, A_max),
-    #         "sh": (sh_min, sh_max)
-    #     }
-    #     if fb_min is not None or fb_max is not None:
-    #         param_bounds["fb"] = (
-    #             fb_min if fb_min is not None else x[0],
-    #             fb_max if fb_max is not None else x[-1]
-    #         )
-        
-    #     # Fit
-    #     A, fb, sh, n = fit_bending_power_law(
-    #         x, y,
-    #         noise_bound_percent=noise_bound_percent,
-    #         initial_params=initial_params,
-    #         param_bounds=param_bounds,
-    #         maxfev=maxfev
-    #     )
-        
-    #     # Generate plot
-    #     filename = parameters.get("filename", "FITS File")
-    #     fig = plot_bending_power_law_with_residual_figure(
-    #         x, y, A, fb, sh, n,
-    #         title=f"Bending Power Law Fit - [{filename}]"
-    #     )
-        
-    #     fitted_params = {
-    #         "A": float(A),
-    #         "fb": float(fb),
-    #         "sh": float(sh),
-    #         "n": float(n)
-    #     }
-        
-    #     return fitted_params, fig
-    
-    # def _fig_to_bytes(self, fig) -> bytes:
-    #     """Convert matplotlib figure to PNG bytes"""
-    #     buf = io.BytesIO()
-    #     fig.savefig(buf, format='png', dpi=100, bbox_inches='tight')
-    #     buf.seek(0)
-    #     return buf.read()
     async def _fit_power_law(
         self,
         x: np.ndarray,

@@ -31,3 +31,6 @@ storage/plots/bending_power_law/*
 /guide
 
 /logs
+
+app/agents/classification_parameter/test_*.py
+app/agents/classification_parameter/test_results_*.json

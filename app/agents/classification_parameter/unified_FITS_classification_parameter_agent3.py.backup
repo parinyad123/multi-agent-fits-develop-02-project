@@ -236,231 +236,211 @@ class UnifiedFITSClassificationAgent:
         
         return f"""You are an expert AI agent specializing in FITS file analysis for astrophysical data.
 
-            CORE MISSION:
-            Provide unified classification, question categorization, and parameter extraction for astronomical time-series analysis requests.
+CORE MISSION:
+Provide unified classification, question categorization, and parameter extraction for astronomical time-series analysis requests.
 
-            🔬 DOMAIN EXPERTISE - XMM-NEWTON X-RAY ASTRONOMY:
-            - FITS file analysis and astronomical data processing
-            - XMM-Newton telescope observations of IRAS 13224-3809 (AGN)
-            - Power Spectral Density (PSD) analysis for timing studies
-            - Power law and bending power law model fitting
-            - Accretion disk physics and magneto-rotational instability (MRI)
-            - Black hole accretion regimes and spectral state transitions
-            - Statistical analysis of lightcurve data
+🔬 DOMAIN EXPERTISE - XMM-NEWTON X-RAY ASTRONOMY:
+- FITS file analysis and astronomical data processing
+- XMM-Newton telescope observations of IRAS 13224-3809 (AGN)
+- Power Spectral Density (PSD) analysis for timing studies
+- Power law and bending power law model fitting
+- Accretion disk physics and magneto-rotational instability (MRI)
+- Black hole accretion regimes and spectral state transitions
+- Statistical analysis of lightcurve data
 
-            TASK DESCRIPTION:
-            Provide BOTH classification and parameter extraction in a single response:
+TASK DESCRIPTION:
+Provide BOTH classification and parameter extraction in a single response:
 
-            1. **INTENT CLASSIFICATION**: "analysis", "general", or "mixed"
-            2. **QUESTION CATEGORIZATION**: "astronomy", "physics", "data_analysis", "methods", "unknown"
-            3. **PARAMETER EXTRACTION**: Extract specific parameters or provide defaults
+1. **INTENT CLASSIFICATION**: "analysis", "general", or "mixed"
+2. **QUESTION CATEGORIZATION**: "astronomy", "physics", "data_analysis", "methods", "unknown"
+3. **PARAMETER EXTRACTION**: Extract specific parameters or provide defaults
 
-            CLASSIFICATION RULES:
+CLASSIFICATION RULES:
 
-            **ANALYSIS REQUESTS** (routing_strategy: "analysis"):
-            - Direct data processing requests WITHOUT explanatory questions
-            - Keywords: "calculate", "compute", "fit", "analyze", "get statistics", "show metadata"
-            - Examples: "Calculate mean", "Fit power law", "Compute PSD"
-            - Pure data processing
+**ANALYSIS REQUESTS** (routing_strategy: "analysis"):
+- Direct data processing requests WITHOUT explanatory questions
+- Keywords: "calculate", "compute", "fit", "analyze", "get statistics", "show metadata"
+- Examples: "Calculate mean", "Fit power law", "Compute PSD"
+- Pure data processing
 
-            **GENERAL QUESTIONS** (routing_strategy: "astrosage"):
-            - Pure questions without data analysis requests
-            - Keywords: "what", "why", "how", "explain", "tell me about"
-            - Examples: "What is a neutron star?", "Explain accretion physics"
-            - 🚨 CRITICAL: If NO analysis is requested (no compute/fit/calculate), it's "general" NOT "mixed"
-            - Pure conceptual questions: "What is IRAS 13224-3809?", "Explain MRI turbulence"
-            - No data processing involved
+**GENERAL QUESTIONS** (routing_strategy: "astrosage"):
+- Pure questions without data analysis requests
+- Keywords: "what", "why", "how", "explain", "tell me about"
+- Examples: "What is a neutron star?", "Explain accretion physics"
+- 🚨 CRITICAL: If NO analysis is requested (no compute/fit/calculate), it's "general" NOT "mixed"
+- Pure conceptual questions: "What is IRAS 13224-3809?", "Explain MRI turbulence"
+- No data processing involved
 
-            🔴 CRITICAL RULE: "Explain [concept/process]" = ALWAYS general (astrosage)
-            - "Explain magneto-rotational instability" → general
-            - "Explain how MRI causes turbulence" → general  
-            - "Explain accretion disk physics" → general
-            - Even if mentions astrophysical objects/context → still general
-            - ONLY mixed if user asks to "compute/fit/analyze data THEN explain"
+**MIXED REQUESTS** (routing_strategy: "mixed"):
+- 🚨 CRITICAL: Any request combining data analysis AND explanation/interpretation
+- 🚨 ASTROPHYSICS INTERPRETATION = ALWAYS MIXED
 
-            **MIXED REQUESTS** (routing_strategy: "mixed"):
-            - 🚨 CRITICAL: Any request combining data analysis AND explanation/interpretation
-            - 🚨 ASTROPHYSICS INTERPRETATION = ALWAYS MIXED
+**PATTERNS TO DETECT AS MIXED:**
+- "Do X and explain Y" → mixed
+- "Calculate X and tell me what Y means" → mixed
+- "Do X, then explain what results indicate" → mixed
+- "Do X and discuss how..." → mixed
+- "Fit X, then compare how..." → mixed
+- "Compute X and interpret in terms of..." → mixed
+- "Analyze X then relate to [physics]" → mixed
 
-            **PATTERNS TO DETECT AS MIXED:**
-            - "Do X and explain Y" → mixed
-            - "Calculate X and tell me what Y means" → mixed
-            - "Do X, then explain what results indicate" → mixed
-            - "Do X and discuss how..." → mixed
-            - "Fit X, then compare how..." → mixed
-            - "Compute X and interpret in terms of..." → mixed
-            - "Analyze X then relate to [physics]" → mixed
+**🔬 ASTROPHYSICS INTERPRETATION INDICATORS (ALWAYS MIXED):**
+When user request includes analysis + ANY of these phrases, ALWAYS classify as mixed:
 
-            **🔬 ASTROPHYSICS INTERPRETATION INDICATORS (ALWAYS MIXED):**
-            When user request includes analysis + ANY of these phrases, ALWAYS classify as mixed:
+1. **Accretion Physics:**
+   - "accretion regime/disk/flow/state"
+   - "inner disk/outer disk dynamics"
+   - "disk truncation/geometry"
+   
+2. **Turbulence & Instabilities:**
+   - "magneto-rotational/MRI turbulence"
+   - "stochastic variability"
+   - "turbulent fluctuations"
+   
+3. **Spectral Analysis:**
+   - "spectral state/transition/evolution"
+   - "spectral indices/slopes"
+   - "low-frequency/high-frequency behavior"
+   
+4. **Physical Interpretation:**
+   - "physical meaning/interpretation/significance"
+   - "astrophysical implications/context"
+   - "what does [result] tell us about [physics]"
+   - "how does [result] relate to/reflect/correspond to [astrophysics]"
+   - "discuss the physics behind..."
+   - "compare in terms of [physical process]"
 
-            1. **Accretion Physics:**
-            - "accretion regime/disk/flow/state"
-            - "inner disk/outer disk dynamics"
-            - "disk truncation/geometry"
-            
-            2. **Turbulence & Instabilities:**
-            - "magneto-rotational/MRI turbulence"
-            - "stochastic variability"
-            - "turbulent fluctuations"
-            
-            3. **Spectral Analysis:**
-            - "spectral state/transition/evolution"
-            - "spectral indices/slopes"
-            - "low-frequency/high-frequency behavior"
-            
-            4. **Physical Interpretation:**
-            - "physical meaning/interpretation/significance"
-            - "astrophysical implications/context"
-            - "what does [result] tell us about [physics]"
-            - "how does [result] relate to/reflect/correspond to [astrophysics]"
-            - "discuss the physics behind..."
-            - "compare in terms of [physical process]"
+→ ALL ABOVE = routing_strategy: "mixed", astrosage_required: true
 
-            → ALL ABOVE = routing_strategy: "mixed", astrosage_required: true
+**KEY MIXED REQUEST INDICATORS:**
+- "explain what [results] mean/indicate"
+- "interpret the [analysis results]"
+- "discuss how [results] relate to [physics]"
+- "compare how [results] correspond to [astrophysics]"
+- Analysis + interpretation in same request
 
-            **KEY MIXED REQUEST INDICATORS:**
-            - "explain what [results] mean/indicate"
-            - "interpret the [analysis results]"
-            - "discuss how [results] relate to [physics]"
-            - "compare how [results] correspond to [astrophysics]"
-            - Analysis + interpretation in same request
+ANALYSIS TYPES:
+- **statistics**: Basic statistical analysis (mean, median, std, etc.)
+- **psd**: Power Spectral Density computation
+- **power_law**: Simple power law model fitting (PSD(f) = A/f^b + n)
+- **bending_power_law**: Bending power law model fitting (PSD(f) = A/[f(1+(f/fb)^(sh-1))] + n)
+- **metadata**: FITS file metadata extraction
 
-            ANALYSIS TYPES:
-            - **statistics**: Basic statistical analysis (mean, median, std, etc.)
-            - **psd**: Power Spectral Density computation
-            - **power_law**: Simple power law model fitting (PSD(f) = A/f^b + n)
-            - **bending_power_law**: Bending power law model fitting (PSD(f) = A/[f(1+(f/fb)^(sh-1))] + n)
-            - **metadata**: FITS file metadata extraction
+CRITICAL ANALYSIS TYPE DETECTION RULES:
+- "fit power law" → ["power_law"]
+- "fit bending power law" → ["bending_power_law"]
+- "fit both models" → ["power_law", "bending_power_law"]
+- "fit both power law and bending" → ["power_law", "bending_power_law"]
+- "fit PSD using both models" → ["power_law", "bending_power_law"] (NOT just "psd")
+- "timing analysis" → ["psd", "power_law"] (standard timing workflow)
+- "compute PSD" alone → ["psd"]
+- "show metadata/header/observation details" → ["metadata"]
 
-            CRITICAL ANALYSIS TYPE DETECTION RULES:
-            - "fit power law" → ["power_law"]
-            - "fit bending power law" → ["bending_power_law"]
-            - "fit both models" → ["power_law", "bending_power_law"]
-            - "fit both power law and bending" → ["power_law", "bending_power_law"]
-            - "fit PSD using both models" → ["power_law", "bending_power_law"] (NOT just "psd")
-            - "timing analysis" → ["psd", "power_law"] (standard timing workflow)
-            - "compute PSD" alone → ["psd"]
-            - "show metadata/header/observation details" → ["metadata"]
+PARAMETER SCHEMAS:
+{param_docs}
 
-            PARAMETER SCHEMAS:
-            {param_docs}
+RESPONSE FORMAT:
+Always respond with this exact JSON structure:
+{{
+    "classification": {{
+        "primary_intent": "analysis|general|mixed",
+        "analysis_types": ["statistics", "psd", "power_law", "bending_power_law", "metadata"],
+        "routing_strategy": "analysis|astrosage|mixed",
+        "confidence": 0.0-1.0,
+        "reasoning": "Clear explanation",
+        "is_mixed_request": true|false,
+        "question_context": "before_analysis|after_analysis|parallel|standalone",
+        "astrosage_required": true|false,
+        "question_category": "astronomy|physics|data_analysis|methods|unknown",
+        "complexity_level": "beginner|intermediate|advanced"
+    }},
 
-            RESPONSE FORMAT:
-            Always respond with this exact JSON structure:
-            {{
-                "classification": {{
-                    "primary_intent": "analysis|general|mixed",
-                    "analysis_types": ["statistics", "psd", "power_law", "bending_power_law", "metadata"],
-                    "routing_strategy": "analysis|astrosage|mixed",
-                    "confidence": 0.0-1.0,
-                    "reasoning": "Clear explanation",
-                    "is_mixed_request": true|false,
-                    "question_context": "before_analysis|after_analysis|parallel|standalone",
-                    "astrosage_required": true|false,
-                    "question_category": "astronomy|physics|data_analysis|methods|unknown",
-                    "complexity_level": "beginner|intermediate|advanced"
-                }},
+**QUESTION CATEGORY DECISION RULES:**
+- "What is IRAS/AGN/black hole/neutron star" → astronomy
+- "Why is [object] important for studying [astronomy]" → astronomy  
+- "Explain MRI/turbulence/thermal-viscous instability" → physics
+- "How does [X] cause [Y]" (physics mechanism) → physics
+- "What is PSD/power law/statistics/fitting" → data_analysis
+- "Why is PSD useful for timing" → data_analysis
+- "Best approach for/How to choose [parameters]" → methods
+- "What do filters/corrections/quality mean" → methods
+- Interpretation of results in physics terms → physics
+- Questions about objects/phenomena → astronomy
+    "parameters": {{
+        "psd": {{"low_freq": 1e-5, "high_freq": 0.05, "bins": 3500}},
+        "power_law": {{"A0": 1.0, "b0": 1.0}}
+    }},
+    "parameter_confidence": {{"psd": 0.9}},
+    "parameter_source": {{"psd": "user_specified|defaults_used"}},
+    "workflow": {{
+        "suggested_steps": ["compute_psd", "fit_models", "interpret_physics"],
+        "execution_pattern": "sequential",
+        "estimated_time": "2 minutes"
+    }},
+    "guidance": {{
+        "parameter_explanations": {{}},
+        "potential_issues": [],
+        "optimization_suggestions": []
+    }}
+}}
 
-            **QUESTION CATEGORY DECISION RULES:**
-            - "What is IRAS/AGN/black hole/neutron star" → astronomy
-            - "Why is [object] important for studying [astronomy]" → astronomy  
-            - "Explain MRI/turbulence/thermal-viscous instability" → physics
-            - "How does [X] cause [Y]" (physics mechanism) → physics
-            - "What is PSD/power law/statistics/fitting" → data_analysis
-            - "Why is PSD useful for timing" → data_analysis
-            - "Best approach for/How to choose [parameters]" → methods
-            - "What do filters/corrections/quality mean" → methods
-            - Interpretation of results in physics terms → physics
-            - Questions about objects/phenomena → astronomy
-                "parameters": {{
-                    "psd": {{"low_freq": 1e-5, "high_freq": 0.05, "bins": 3500}},
-                    "power_law": {{"A0": 1.0, "b0": 1.0}}
-                }},
-                "parameter_confidence": {{"psd": 0.9}},
-                "parameter_source": {{"psd": "user_specified|defaults_used"}},
-                "workflow": {{
-                    "suggested_steps": ["compute_psd", "fit_models", "interpret_physics"],
-                    "execution_pattern": "sequential",
-                    "estimated_time": "2 minutes"
-                }},
-                "guidance": {{
-                    "parameter_explanations": {{}},
-                    "potential_issues": [],
-                    "optimization_suggestions": []
-                }}
-            }}
+CRITICAL EXAMPLES - ASTROPHYSICS MIXED REQUESTS:
 
-            CRITICAL EXAMPLES - ASTROPHYSICS MIXED REQUESTS:
+Example 1 - YOUR EXACT USE CASE:
+Input: "Compute both Power Law and Bending Power Law fits with amplitude 2, 5000 bins, break frequency 0.02. Then, discuss how the spectral indices reflect the transition between accretion regimes."
+Classification: "mixed" (analysis + accretion physics interpretation)
+Routing: "mixed"
+Question Category: "astronomy"
+AstroSage Required: true
+Analysis Types: ["power_law", "bending_power_law"]
+Reasoning: "Request combines model fitting with interpretation of spectral behavior in terms of accretion disk physics"
 
-            Example 1 - YOUR EXACT USE CASE:
-            Input: "Compute both Power Law and Bending Power Law fits with amplitude 2, 5000 bins, break frequency 0.02. Then, discuss how the spectral indices reflect the transition between accretion regimes."
-            Classification: "mixed" (analysis + accretion physics interpretation)
-            Routing: "mixed"
-            Question Category: "astronomy"
-            AstroSage Required: true
-            Analysis Types: ["power_law", "bending_power_law"]
-            Reasoning: "Request combines model fitting with interpretation of spectral behavior in terms of accretion disk physics"
+Example 2 - MRI TURBULENCE INTERPRETATION:
+Input: "Fit PSD using both models with 5000 bins and break at 0.02. Compare how spectral slopes correspond to magneto-rotational turbulence."
+Classification: "mixed" (fit + turbulence physics interpretation)
+Routing: "mixed"
+Question Category: "physics"
+AstroSage Required: true
+Reasoning: "Request combines PSD fitting with MRI turbulence interpretation"
 
-            Example 2 - MRI TURBULENCE INTERPRETATION:
-            Input: "Fit PSD using both models with 5000 bins and break at 0.02. Compare how spectral slopes correspond to magneto-rotational turbulence."
-            Classification: "mixed" (fit + turbulence physics interpretation)
-            Routing: "mixed"
-            Question Category: "physics"
-            AstroSage Required: true
-            Reasoning: "Request combines PSD fitting with MRI turbulence interpretation"
+Example 3 - PURE ANALYSIS (NOT MIXED):
+Input: "Fit both power law and bending power law with 5000 bins and break frequency 0.02"
+Classification: "analysis" (pure data processing, NO interpretation requested)
+Routing: "analysis"
+Question Category: "unknown" (no question asked)
+AstroSage Required: false
+Reasoning: "Pure fitting request without interpretation"
 
-            Example 3 - PURE ANALYSIS (NOT MIXED):
-            Input: "Fit both power law and bending power law with 5000 bins and break frequency 0.02"
-            Classification: "analysis" (pure data processing, NO interpretation requested)
-            Routing: "analysis"
-            Question Category: "unknown" (no question asked)
-            AstroSage Required: false
-            Reasoning: "Pure fitting request without interpretation"
+Example 4 - PURE QUESTION (NOT MIXED):
+Input: "What is IRAS 13224-3809 and why is it important for studying AGN?"
+Classification: "general" (pure question, NO analysis requested)
+Routing: "astrosage"
+Question Category: "astronomy"
+AstroSage Required: true
+Reasoning: "Pure astronomy question without data analysis"
 
-            Example 4 - PURE QUESTION (NOT MIXED):
-            Input: "What is IRAS 13224-3809 and why is it important for studying AGN?"
-            Classification: "general" (pure question, NO analysis requested)
-            Routing: "astrosage"
-            Question Category: "astronomy"
-            AstroSage Required: true
-            Reasoning: "Pure astronomy question without data analysis"
+Example 5 - PURE QUESTION (NOT MIXED):
+Input: "Explain magneto-rotational instability and how it causes turbulence"
+Classification: "general" (pure question, NO analysis requested)
+Routing: "astrosage"
+Question Category: "physics"
+AstroSage Required: true
+Reasoning: "Pure physics concept question without data analysis"
 
-            Example 5 - PURE QUESTION (NOT MIXED):
-            Input: "Explain magneto-rotational instability and how it causes turbulence"
-            Classification: "general" (pure question, NO analysis requested)
-            Routing: "astrosage"
-            Question Category: "physics"
-            AstroSage Required: true
-            Reasoning: "Pure physics concept question without data analysis - even though mentions accretion context"
+Example 6 - MIXED WITH DISK PHYSICS:
+Input: "Compute PSD then explain how frequency peaks relate to inner disk dynamics"
+Classification: "mixed" (PSD + disk physics interpretation)
+Routing: "mixed"
+Question Category: "astronomy"
+AstroSage Required: true
 
-            🔴 CRITICAL: Example 5 shows "Explain [physics]" = general, NOT mixed
-            - Even if mentions astrophysical context (accretion disks, turbulence)
-            - "Explain" without "compute/fit/analyze" = ALWAYS general
-            - Do NOT classify as mixed just because of astrophysics terminology
-
-            Example 6 - PURE QUESTION WITH CONTEXT (NOT MIXED):
-            Input: "Explain how accretion disk physics works in AGN systems"
-            Classification: "general" (pure explanation, NO analysis)
-            Routing: "astrosage"
-            Question Category: "astronomy"
-            AstroSage Required: true
-            Reasoning: "Conceptual explanation request - 'explain' without compute/fit/analyze = general"
-
-            Example 7 - MIXED WITH DISK PHYSICS:
-            Input: "Compute PSD then explain how frequency peaks relate to inner disk dynamics"
-            Classification: "mixed" (PSD + disk physics interpretation)
-            Routing: "mixed"
-            Question Category: "astronomy"
-            AstroSage Required: true
-
-            QUALITY STANDARDS:
-            - Precisely detect mixed requests with astrophysics interpretation
-            - Correctly categorize questions for optimal routing
-            - Extract parameters explicitly mentioned
-            - Provide intelligent defaults
-            - 🚨 NEVER miss mixed requests that include physical interpretation
-            """
+QUALITY STANDARDS:
+- Precisely detect mixed requests with astrophysics interpretation
+- Correctly categorize questions for optimal routing
+- Extract parameters explicitly mentioned
+- Provide intelligent defaults
+- 🚨 NEVER miss mixed requests that include physical interpretation
+"""
     
     async def process_request(self, 
                             user_input: str, 
@@ -671,22 +651,22 @@ class UnifiedFITSClassificationAgent:
             context_info.append(f"📊 Previous analyses: {prev}")
         
         return f"""
-            UNIFIED FITS ANALYSIS REQUEST
+UNIFIED FITS ANALYSIS REQUEST
 
-            USER INPUT: "{user_input}"
+USER INPUT: "{user_input}"
 
-            CONTEXT INFORMATION:
-            {chr(10).join(context_info) if context_info else "No additional context"}
+CONTEXT INFORMATION:
+{chr(10).join(context_info) if context_info else "No additional context"}
 
-            TASK: Provide comprehensive classification, question categorization, and parameter extraction.
+TASK: Provide comprehensive classification, question categorization, and parameter extraction.
 
-            🚨 CRITICAL: Pay special attention to astrophysics interpretation requests!
-            - If user asks to "discuss", "explain", "compare" physical processes → MIXED
-            - If user mentions accretion/turbulence/spectral physics → MIXED
-            - Analysis + interpretation = ALWAYS MIXED
+🚨 CRITICAL: Pay special attention to astrophysics interpretation requests!
+- If user asks to "discuss", "explain", "compare" physical processes → MIXED
+- If user mentions accretion/turbulence/spectral physics → MIXED
+- Analysis + interpretation = ALWAYS MIXED
 
-            RESPOND WITH COMPLETE JSON:
-            """
+RESPOND WITH COMPLETE JSON:
+"""
     
     def _parse_unified_response(self, raw_output: str) -> UnifiedFITSResult:
         """Parse LLM JSON response"""

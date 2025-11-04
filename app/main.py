@@ -13,6 +13,7 @@ from app.agents.classification_parameter.unified_FITS_classification_parameter_a
     )
 from app.agents.analysis.unified_analysis_agent import UnifiedAnalysisAgent
 from app.services.astrosage import AstroSageClient
+from app.agents.rewrite.gpt_rewrite_agent import GPTRewriteAgent
 
 from app.core.constants import AgentNames
 from app.core.config import settings
@@ -80,9 +81,15 @@ async def lifespan(app: FastAPI):
     orchestrator.register_agent(AgentNames.ASTROSAGE, astrosage_client)
     logger.info("AstroSage Client registered")
 
-    # TODO: Add more agents as needed
-    # TODO: Add AstroSage Client when ready
-    # TODO: Add Rewrite Agent when ready
+    # ========================================
+    # Register Rewrite Agent
+    # ========================================
+    rewrite_agent = GPTRewriteAgent(
+        default_model="turbo",
+        auto_upgrade=False
+    )
+    orchestrator.register_agent(AgentNames.REWRITE, rewrite_agent)
+    logger.info("✅ Rewrite Agent registered (GPT-4o-mini)")
 
     # Strat workers
     import asyncio

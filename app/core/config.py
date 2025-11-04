@@ -52,6 +52,16 @@ class Settings(BaseSettings):
     astrosage_default_max_tokens: int = 600
     astrosage_default_top_p: float = 0.95
 
+    # Rewrite Agent configuration
+    rewrite_model: str = "mini"           # "mini", "turbo", or "standard"
+    rewrite_auto_upgrade: bool = True     # Auto-upgrade for complex queries
+    rewrite_temperature: float = 0.3
+    rewrite_max_tokens: int = 3000
+    
+    # Cost tracking (optional)
+    enable_cost_tracking: bool = True
+    monthly_budget_limit: float = 100.0   # USD
+
     @property
     def project_root(self) -> Path:
         """Get the root directory of the project."""

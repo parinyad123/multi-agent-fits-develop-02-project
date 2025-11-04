@@ -472,7 +472,7 @@ class DynamicWorkflowOrchestrator:
                         'reason': 'Rewrite Agent not available',
                         'completed_at': datetime.now().isoformat()
                     })
-                else:
+                else:                    
                     async with self.shared_llm_semaphore:
                         final_response = await rewrite_agent.rewrite_response(
                             user_input=user_query,
@@ -480,9 +480,16 @@ class DynamicWorkflowOrchestrator:
                             intermediate_results=workflow['completed_steps']
                         )
 
+                    # Extract plots from analysis step
+                    plots = self._extract_plots(workflow['completed_steps'])
+
+                    # Store structured response
                     workflow['completed_steps'].append({
                         'step': 'rewrite',
-                        'result': final_response,
+                        'result': {
+                            'content': final_response,
+                            'plots': plots
+                        },
                         'completed_at': datetime.now().isoformat()
                     })
                 
@@ -517,6 +524,7 @@ class DynamicWorkflowOrchestrator:
                 del workflow['_db_session']
             
             await self._add_to_memory(task_id, workflow)
+            
 
     async def _handle_analysis(self, workflow: dict, task_id: str) -> dict:
         """ 
@@ -568,16 +576,6 @@ class DynamicWorkflowOrchestrator:
                     f"Database session not found in workflow for task {task_id}. "
                     f"This should never happen - check _process_workflow implementation."
                 )
-            
-            # async with AsyncSessionLocal() as session:
-            #     try:
-
-                    # Ensure session exists FIRST
-                    # await self._ensure_session_exists(
-                    #     session_id=analysis_request.session_id,
-                    #     user_id=analysis_request.user_id,
-                    #     db_session=session  # Use SAME session
-                    # )
 
                 # Call Analysis Agent with SAME session
             analysis_result: AnalysisResult = await analysis_agent.process_request(
@@ -792,3 +790,32 @@ class DynamicWorkflowOrchestrator:
                 'completed_at': datetime.now().isoformat()
             })
         return workflow
+    
+    def _extract_plots(self, completed_steps: List[Dict]) -> List[Dict]:
+        """Extract plot information from analysis step"""
+        plots = []
+        
+        for step in completed_steps:
+            if step.get('step') == 'analysis':
+                analysis_result = step.get('analysis_result', {})
+                raw_plots = analysis_result.get('plots', [])
+                
+                for plot in raw_plots:
+                    plots.append({
+                        'plot_id': str(plot.get('plot_id')),
+                        'plot_type': plot.get('plot_type'),
+                        'plot_url': f"/api/v1/plots/{plot.get('plot_type')}/{plot.get('plot_url').split('/')[-1]}",
+                        'title': self._get_plot_title(plot.get('plot_type')),
+                        'created_at': plot.get('created_at')
+                    })
+        
+        return plots
+    
+    def _get_plot_title(self, plot_type: str) -> str:
+        """Get human-readable plot title"""
+        titles = {
+            'psd': 'Power Spectral Density',
+            'power_law': 'Power Law Fit',
+            'bending_power_law': 'Bending Power Law Fit'
+        }
+        return titles.get(plot_type, plot_type.replace('_', ' ').title())

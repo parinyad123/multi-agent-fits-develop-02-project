@@ -89,7 +89,7 @@ async def lifespan(app: FastAPI):
         auto_upgrade=False
     )
     orchestrator.register_agent(AgentNames.REWRITE, rewrite_agent)
-    logger.info("✅ Rewrite Agent registered (GPT-4o-mini)")
+    logger.info("✅ Rewrite Agent registered")
 
     # Strat workers
     import asyncio
@@ -129,10 +129,10 @@ def get_orchestrator() -> DynamicWorkflowOrchestrator:
     return orchestrator
 
 # Include routers
-from app.api.v1 import analysis, files
-
+from app.api.v1 import analysis, files, plots
 app.include_router(analysis.router, prefix="/api/v1", tags=["analysis"])
-app.include_router(files.router, prefix="/api/v1/files", tags=["files"]) 
+app.include_router(files.router, prefix="/api/v1/files", tags=["files"])
+app.include_router(plots.router, prefix="/api/v1", tags=["plots"])
 
 @app.get("/")
 async def root():

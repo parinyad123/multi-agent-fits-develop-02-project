@@ -7,11 +7,13 @@ from uuid import uuid4
 from typing import Optional
 from sqlalchemy import (
     Column, String, BigInteger, Boolean, DateTime, Text, Integer,
-    ForeignKey, Index, CheckConstraint, ARRAY
+    ForeignKey, Index, CheckConstraint, ARRAY, Numeric
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from datetime import datetime
+from uuid import uuid4
 
 from app.db.base import Base
 
@@ -33,6 +35,8 @@ class User(Base):
     fits_files = relationship("FITSFile", back_populates="user", cascade="all, delete-orphan")
     sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
     analyses = relationship("AnalysisHistory", back_populates="user", cascade="all, delete-orphan")
+    workflows = relationship("WorkflowExecution", back_populates="user", cascade="all, delete-orphan")
+    conversation_messages = relationship("ConversationMessage", back_populates="user", cascade="all, delete-orphan")
     
     # Indexes
     __table_args__ = (
@@ -126,7 +130,9 @@ class Session(Base):
     current_file = relationship("FITSFile", foreign_keys=[current_file_id])
     file_sessions = relationship("FileSession", back_populates="session", cascade="all, delete-orphan")
     analyses = relationship("AnalysisHistory", back_populates="session", cascade="all, delete-orphan")
-    
+    workflows = relationship("WorkflowExecution", back_populates="session", cascade="all, delete-orphan")
+    conversation_messages = relationship("ConversationMessage", back_populates="session", cascade="all, delete-orphan")
+
     # Indexes
     __table_args__ = (
         Index("idx_session_user_id", "user_id"),
@@ -257,3 +263,128 @@ class PlotFile(Base):
     
     def __repr__(self):
         return f"<PlotFile(plot_id={self.plot_id}, plot_type={self.plot_type})>"
+    
+# ==========================================
+# Workflow Executions Table
+# ==========================================
+
+class WorkflowExecution(Base):
+    """
+    Track complete workflow executions
+
+    Record:
+    - User request
+    - Routing strategy
+    - All agent outputs
+    - Final response
+    - Execution metadata
+    """
+    __tablename__ = "workflow_executions"
+
+    # Primary key
+    workflow_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    
+    # Foreign keys
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    session_id = Column(String(255), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    file_id = Column(UUID(as_uuid=True), ForeignKey("fits_files.file_id", ondelete="SET NULL"), nullable=True)
+    analysis_id = Column(UUID(as_uuid=True), ForeignKey("analysis_history.analysis_id", ondelete="SET NULL"), nullable=True)
+    
+    # Request info
+    user_query = Column(Text, nullable=False)
+    request_context = Column(JSONB, default=dict)
+    
+    # Routing
+    routing_strategy = Column(String(50), nullable=True)  # "analysis", "astrosage", "mixed"
+    
+    # Execution steps (complete history)
+    completed_steps = Column(JSONB, default=list)  # All intermediate results
+    
+    # Status
+    status = Column(String(50), default="pending")  # pending, in_progress, completed, failed
+    current_step = Column(String(50), nullable=True)
+    progress = Column(String(10), default="0%")
+    
+    # Error handling
+    error = Column(Text, nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Execution metadata
+    execution_time_seconds = Column(Integer, nullable=True)
+    total_tokens_used = Column(Integer, default=0)
+    estimated_cost = Column(Numeric(10, 6), default=0.0)
+    
+    # Relationships
+    user = relationship("User", back_populates="workflows")
+    session = relationship("Session", back_populates="workflows")
+    conversation_messages = relationship("ConversationMessage", back_populates="workflow", cascade="all, delete-orphan")
+    
+    # Indexes
+    __table_args__ = (
+        Index("idx_workflow_user_id", "user_id"),
+        Index("idx_workflow_session_id", "session_id"),
+        Index("idx_workflow_created_at", "created_at"),
+        Index("idx_workflow_status", "status"),
+    )
+
+    def __repr__(self):
+        return f"<WorkflowExecution(workflow_id={self.workflow_id}, status={self.status})>"
+
+
+# ==========================================
+# Conversation Messages Table 
+# ==========================================
+
+class ConversationMessage(Base):
+    """
+    Individual messages in a conversation
+    
+    บันทึก:
+    - User messages
+    - Assistant responses
+    - Message order
+    - Associated workflow
+    """
+    __tablename__ = "conversation_messages"
+    
+    # Primary key
+    message_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    
+    # Foreign keys
+    session_id = Column(String(255), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False)
+    workflow_id = Column(UUID(as_uuid=True), ForeignKey("workflow_executions.workflow_id", ondelete="CASCADE"), nullable=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    
+    # Message info
+    role = Column(String(20), nullable=False)  # "user" or "assistant"
+    content = Column(Text, nullable=False)
+    
+    # Message order (for proper sequencing)
+    sequence_number = Column(Integer, nullable=False)
+    
+    # Message metadata
+    message_metadata = Column(JSONB, default=dict)  # plots, tokens, model used, etc.
+    
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationships
+    session = relationship("Session", back_populates="conversation_messages")
+    workflow = relationship("WorkflowExecution", back_populates="conversation_messages")
+    user = relationship("User", back_populates="conversation_messages")
+    
+    # Indexes
+    __table_args__ = (
+        Index("idx_message_session_id", "session_id"),
+        Index("idx_message_workflow_id", "workflow_id"),
+        Index("idx_message_created_at", "created_at"),
+        Index("idx_message_session_sequence", "session_id", "sequence_number"),
+    )
+
+    def __repr__(self):
+        return f"<ConversationMessage(message_id={self.message_id}, role={self.role})>"
+

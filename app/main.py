@@ -129,10 +129,12 @@ def get_orchestrator() -> DynamicWorkflowOrchestrator:
     return orchestrator
 
 # Include routers
-from app.api.v1 import analysis, files, plots
+from app.api.v1 import analysis, files, plots, conversations  
 app.include_router(analysis.router, prefix="/api/v1", tags=["analysis"])
 app.include_router(files.router, prefix="/api/v1/files", tags=["files"])
 app.include_router(plots.router, prefix="/api/v1", tags=["plots"])
+app.include_router(conversations.router, prefix="/api/v1", tags=["conversations"])
+
 
 @app.get("/")
 async def root():

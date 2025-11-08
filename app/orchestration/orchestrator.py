@@ -7,36 +7,35 @@ multi-agent-fits-dev-02/app/orchestration/orchestrator.py
 """
 
 import asyncio
-import hashlib
-import json
 import logging
-import os
-import sys
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional
 from uuid import uuid4, UUID
 from datetime import datetime
 
 from pydantic import BaseModel
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
 from app.db.base import AsyncSessionLocal
+from app.db.models import Session as SessionModel
 from app.agents.analysis.models import AnalysisRequest, AnalysisResult
 from app.core.constants import AnalysisStatus
-
-from sqlalchemy import select
-from app.db.models import Session as SessionModel
 
 from app.agents.classification_parameter.unified_FITS_classification_parameter_agent import UnifiedFITSClassificationAgent
 
 from app.services.astrosage.models import AstroSageRequest
+from app.services.conversation_service import ConversationService
 
 from app.core.constants import (
     AgentNames,
     RoutingStrategy,
     WorkflowStatusType,
     ResourceLimits,
-    ErrorMessages
+    ErrorMessages,
+    AnalysisStatus,
+    ModelNames
     )
 
 logger = logging.getLogger(__name__)
@@ -75,6 +74,11 @@ class DynamicWorkflowOrchestrator:
     1. astrosage: Classification → AstroSage → Rewrite
     2. analysis: Classification → Analysis → Rewrite
     3. mixed: Classification  → Analysis → AstroSage → Rewrite
+
+    Features:
+    - Complete database persistence
+    - Resource management with semaphores
+    - In-memory caching for active workflows
     """
 
     def __init__(self):
@@ -83,16 +87,15 @@ class DynamicWorkflowOrchestrator:
         self.main_queue = asyncio.Queue()
 
         #  Resource semaphores
-        #  IMPORtANT: Classification and Rewrite use GPT-4, so they share the same semaphore
+        #  IMPORtANT: Classification and Rewrite use GPT-3.5, so they share the same semaphore
         self.shared_llm_semaphore = asyncio.Semaphore(ResourceLimits.MAX_GPT_CONCURRENT)
         self.astrosage_semaphore = asyncio.Semaphore(ResourceLimits.MAX_ASTROSAGE_CONCURRENT)
-
 
         # Storage for workflow statuses 
         self.workflow_results = OrderedDict() # In memory 
         self.workflow_lock = asyncio.Lock()
 
-        # Agent
+        # Agent registry
         self.agents = {} # Will be registered later
 
     def register_agent(self, name: str, agent: Any):
@@ -105,17 +108,44 @@ class DynamicWorkflowOrchestrator:
 
     async def submit_request(self, user_request: UserRequest) -> str:
         """
-        Get request from API and built workflow
-        Return: task_id for tracking
-    
+        Submit request and create workflow record in database.
+        
+        Returns:
+            task_id: Unique identifier for tracking workflow
         """
 
         # Generate unique task_id
         task_id = str(uuid4())
 
-        # Initialize workflow status
+        # Create database session
+        async with AsyncSessionLocal() as session:
+
+            # Create workflow execution record
+            workflow_id = await ConversationService.create_workflow_execution(
+                session=session,
+                user_id=user_request.user_id,
+                session_id=user_request.session_id,
+                user_query=user_request.user_query,
+                request_context=user_request.context,
+                file_id=UUID(user_request.fits_file_id.replace('.fits', '')) if user_request.fits_file_id else None
+            )
+            
+            # Save user message
+            await ConversationService.save_user_message(
+                session=session,
+                session_id=user_request.session_id,
+                user_id=user_request.user_id,
+                workflow_id=workflow_id,
+                content=user_request.user_query
+            )
+            
+            await session.commit()
+            logger.info(f"Workflow created in database: {workflow_id}")
+
+        # Initialize workflow in memory (with database ID)
         workflow = {
             'task_id': task_id,
+            'workflow_id': workflow_id,
             'user_request': user_request,
             'status': WorkflowStatusType.QUEUED,
             'routing_strategy': None,
@@ -185,7 +215,7 @@ class DynamicWorkflowOrchestrator:
     async def stop_workers(self):
         """Stop all workers gracefully."""
         # For now, just log - workers will stop when app shuts down
-        logger.info("Stopping workers ...")
+        logger.info("Stopping workers...")
 
     async def _worker(self, worker_name: str):
         """
@@ -206,7 +236,7 @@ class DynamicWorkflowOrchestrator:
                 self.main_queue.task_done()
 
             except Exception as e:
-                logger.error(f"Error in {worker_name} while processing task {task_id}: {e}")
+                logger.error(f"Error in {worker_name} while processing task {task_id}: {e}", exc_info=True)
                 await asyncio.sleep(1)  # Prevent tight loop on error
 
     async def get_workflow_status(self, task_id: str) -> Optional[WorkflowStatus]:
@@ -349,25 +379,47 @@ class DynamicWorkflowOrchestrator:
         2. Route to AstroSage or Analysis or both based on strategy
         3. Rewrite Agent to finalize response
         4. Update workflow status in memory
+
+        Main workflow processor with complete database persistence.
+        
+        Flow:
+        1. Create ONE database session for entire workflow
+        2. Ensure session exists
+        3. Classification
+        4. Route to appropriate agents
+        5. Rewrite response
+        6. Save all results to database
+        7. Commit transaction
         """
 
-        
         try:
             workflow = await self._get_from_memory(task_id)
             if not workflow:
                 logger.error(ErrorMessages.WORKFLOW_NOT_FOUND.format(task_id))
                 return
-
-            start_time = datetime.now()
             
-            # ========================================
-            # STEP 1: Create ONE database session for entire workflow
-            # ========================================
+            start_time = datetime.now()
+
+            workflow_id = workflow.get('workflow_id')
+
+            # # Get database session
+            # async with AsyncSessionLocal() as session:
+                
+            #     # Store session in workflow context
+            #     workflow['_db_session'] = session
+
+            #     # Update status to in_progress
+            #     await ConversationService.update_workflow_status(
+            #         session=session,
+            #         workflow_id=workflow_id,
+            #         status=WorkflowStatusType.IN_PROGRESS,
+            #         current_step="classification",
+            #         progress="10%"
+            #     )
+            
             async with AsyncSessionLocal() as session:
                 
-                # ========================================
-                # IMPORTANT: Store session in workflow context
-                # ========================================
+                # Store session in workflow context
                 workflow['_db_session'] = session
                 
                 # Extract user request data
@@ -385,7 +437,7 @@ class DynamicWorkflowOrchestrator:
                     context = user_request.context
                 
                 # ========================================
-                # STEP 2: Ensure Session Exists (ONCE)
+                # STEP 1: Ensure Session Exists 
                 # ========================================
                 logger.info(f"Ensuring session exists for workflow {task_id}")
                 
@@ -397,30 +449,55 @@ class DynamicWorkflowOrchestrator:
                     )
                 except Exception as e:
                     logger.error(f"Session management failed for {task_id}: {e}", exc_info=True)
+
+                    # Save error to database before return
+                    await ConversationService.update_workflow_status(
+                        session=session,
+                        workflow_id=workflow_id,
+                        status=WorkflowStatusType.FAILED,
+                        error=f"Session error: {str(e)}"
+                    )
+                    await session.commit()
+
+                    # Update in-memory
                     workflow['status'] = WorkflowStatusType.FAILED
                     workflow['error'] = f"Session error: {str(e)}"
                     workflow['completed_at'] = datetime.now()
+
+                    # Clean up session reference
+                    if '_db_session' in workflow:
+                        del workflow['_db_session']
+
                     await self._add_to_memory(task_id, workflow)
                     return
                 
                 # ========================================
-                # STEP 3: CLASSIFICATION AGENT
+                # STEP 2: CLASSIFICATION AGENT
                 # ========================================
                 workflow['status'] = WorkflowStatusType.IN_PROGRESS
                 workflow['current_step'] = 'classification'
                 workflow['progress'] = '10%'
                 await self._add_to_memory(task_id, workflow)
+                
+                # Update status in database
+                await ConversationService.update_workflow_status(
+                    session=session,
+                    workflow_id=workflow_id,
+                    status=WorkflowStatusType.IN_PROGRESS,
+                    current_step="classification",
+                    progress="10%"
+                )
 
                 classification_agent = self.agents.get(AgentNames.CLASSIFICATION)
                 if not classification_agent:
                     raise ValueError(ErrorMessages.AGENT_NOT_FOUND.format(AgentNames.CLASSIFICATION))
-
+                
                 async with self.shared_llm_semaphore:
                     classification_result = await classification_agent.process_request(
                         user_input=user_query,
                         context=context
                     )
-
+                
                 routing_strategy = RoutingStrategy(classification_result.routing_strategy)
                 workflow['routing_strategy'] = routing_strategy
                 workflow['completed_steps'].append({
@@ -440,7 +517,7 @@ class DynamicWorkflowOrchestrator:
                 await self._add_to_memory(task_id, workflow)
 
                 # ========================================
-                # STEP 4: ROUTING BASED ON STRATEGY
+                # STEP 3: ROUTING BASED ON STRATEGY
                 # ========================================
                 if routing_strategy == RoutingStrategy.ASTROSAGE:
                     logger.info(f"Routing strategy: AstroSage only for task {task_id}")
@@ -456,7 +533,7 @@ class DynamicWorkflowOrchestrator:
                     raise ValueError(ErrorMessages.INVALID_ROUTING_STRATEGY.format(routing_strategy))
                 
                 # ========================================
-                # STEP 5: REWRITE AGENT
+                # STEP 4: REWRITE AGENT
                 # ========================================
                 workflow['current_step'] = 'rewrite'
                 workflow['progress'] = '90%'
@@ -472,17 +549,17 @@ class DynamicWorkflowOrchestrator:
                         'reason': 'Rewrite Agent not available',
                         'completed_at': datetime.now().isoformat()
                     })
-                else:                    
+                else:
                     async with self.shared_llm_semaphore:
                         final_response = await rewrite_agent.rewrite_response(
                             user_input=user_query,
                             context=context,
                             intermediate_results=workflow['completed_steps']
                         )
-
+                    
                     # Extract plots from analysis step
                     plots = self._extract_plots(workflow['completed_steps'])
-
+                    
                     # Store structured response
                     workflow['completed_steps'].append({
                         'step': 'rewrite',
@@ -492,11 +569,61 @@ class DynamicWorkflowOrchestrator:
                         },
                         'completed_at': datetime.now().isoformat()
                     })
+
+                # ========================================
+                # SAVE TO DATABASE
+                # ========================================
+
+                # Extract final response
+                final_response = None
+                plots = []
                 
+                for step in workflow['completed_steps']:
+                    if step.get('step') == 'rewrite':
+                        result = step.get('result', {})
+                        final_response = result.get('content') if isinstance(result, dict) else result
+                        plots = result.get('plots', []) if isinstance(result, dict) else []
+                        break
+                
+                # Save assistant message
+                if final_response:
+                    await ConversationService.save_assistant_message(
+                        session=session,
+                        session_id=session_id,
+                        user_id=user_id,
+                        workflow_id=workflow_id,
+                        content=final_response,
+                        metadata={
+                            'plots': plots,
+                            'routing_strategy': str(workflow.get('routing_strategy')),
+                            'execution_time': (datetime.now() - start_time).total_seconds()
+                        }
+                    )
+                
+                # Save workflow results
+                await ConversationService.save_workflow_results(
+                    session=session,
+                    workflow_id=workflow_id,
+                    completed_steps=workflow['completed_steps'],
+                    routing_strategy=str(workflow.get('routing_strategy')),
+                    analysis_id=self._extract_analysis_id(workflow),
+                    total_tokens=self._calculate_total_tokens(workflow),
+                    estimated_cost=self._calculate_cost(workflow)
+                )
+                
+                # Update final status
+                await ConversationService.update_workflow_status(
+                    session=session,
+                    workflow_id=workflow_id,
+                    status=WorkflowStatusType.COMPLETED,
+                    progress="100%"
+                )
+
                 # ========================================
                 # STEP 6: COMMIT ALL CHANGES
                 # ========================================
                 await session.commit()
+                logger.info(f"Workflow saved to database: {workflow_id}")
                 
                 # ========================================
                 # STEP 7: COMPLETE WORKFLOW
@@ -506,15 +633,32 @@ class DynamicWorkflowOrchestrator:
                 workflow['completed_at'] = datetime.now()
                 
                 # Clean up session reference
-                del workflow['_db_session']
+                if '_db_session' in workflow:
+                    del workflow['_db_session']
                 
                 await self._add_to_memory(task_id, workflow)
-
+                
                 duration = (workflow['completed_at'] - start_time).total_seconds()
-                logger.info(f"Workflow {task_id} completed in {duration:.2f}s.")
-
+                logger.info(f"Workflow {task_id} completed in {duration:.2f}s")
+        
         except Exception as e:
             logger.error(f"Error processing workflow {task_id}: {e}", exc_info=True)
+            
+            # Save error to database
+            try:
+                # Create new session for saving error 
+                async with AsyncSessionLocal() as session:
+                    await ConversationService.update_workflow_status(
+                        session=session,
+                        workflow_id=workflow_id,
+                        status=WorkflowStatusType.FAILED,
+                        error=str(e)
+                    )
+                    await session.commit()
+            except Exception as db_error:
+                logger.error(f"Failed to save error to database: {db_error}")
+            
+            # Update in-memory status
             workflow['status'] = WorkflowStatusType.FAILED
             workflow['error'] = str(e)
             workflow['completed_at'] = datetime.now()
@@ -593,12 +737,6 @@ class DynamicWorkflowOrchestrator:
                 f"failed={len(analysis_result.failed_analyses)}"
             )
                     
-                # except Exception as e:
-                #     # Rollback on error
-                #     await session.rollback()
-                #     logger.error(f"Database error during analysis for task {task_id}: {e}")
-                #     raise
-            
             # Step 5: Record result in workflow
             workflow['completed_steps'].append({
                 'step': 'analysis',
@@ -654,7 +792,7 @@ class DynamicWorkflowOrchestrator:
             logger.error(f"FITS file not found for task {task_id}: {e}")
             workflow['completed_steps'].append({
                 'step': 'analysis',
-                'status': 'failed',
+                'status': WorkflowStatusType.FAILED,
                 'error': f"FITS file not found: {str(e)}",
                 'completed_at': datetime.now().isoformat()
             })
@@ -667,7 +805,7 @@ class DynamicWorkflowOrchestrator:
             logger.error(f"Invalid analysis request for task {task_id}: {e}")
             workflow['completed_steps'].append({
                 'step': 'analysis',
-                'status': 'failed',
+                'status': WorkflowStatusType.FAILED,
                 'error': f"Invalid request: {str(e)}",
                 'completed_at': datetime.now().isoformat()
             })
@@ -679,7 +817,7 @@ class DynamicWorkflowOrchestrator:
             logger.error(f"Unexpected error in analysis for task {task_id}: {e}", exc_info=True)
             workflow['completed_steps'].append({
                 'step': 'analysis',
-                'status': 'failed',
+                'status': WorkflowStatusType.FAILED,
                 'error': str(e),
                 'completed_at': datetime.now().isoformat()
             })
@@ -734,10 +872,10 @@ class DynamicWorkflowOrchestrator:
             
             # Build AstroSage request
             astrosage_request = AstroSageRequest(
-                user_id = user_id,
-                session_id = session_id,
-                user_query = user_query,
-                analysis_results = analysis_results
+                user_id=user_id,
+                session_id=session_id,
+                user_query=user_query,
+                analysis_results=analysis_results
             )
             
             # Get database session from workflow
@@ -785,11 +923,27 @@ class DynamicWorkflowOrchestrator:
             logger.error(f"Error in AstroSage step for task {task_id}: {e}", exc_info=True)
             workflow['completed_steps'].append({
                 'step': 'astrosage',
-                'status': 'failed',
+                'status': WorkflowStatusType.FAILED,
                 'error': str(e),
                 'completed_at': datetime.now().isoformat()
             })
         return workflow
+    
+    def _extract_analysis_id(self, workflow: Dict) -> Optional[UUID]:
+        """Extract analysis_id from workflow"""
+        try:
+            for step in workflow.get('completed_steps', []):
+                if step.get('step') == 'analysis':
+                    result = step.get('analysis_result', {})
+                    analysis_id = result.get('analysis_id')
+                    if analysis_id:
+                        # ✅ FIX 7: Handle both string and UUID
+                        if isinstance(analysis_id, str):
+                            return UUID(analysis_id)
+                        return analysis_id
+        except Exception as e:
+            logger.error(f"Error extracting analysis_id: {e}")
+        return None
     
     def _extract_plots(self, completed_steps: List[Dict]) -> List[Dict]:
         """Extract plot information from analysis step"""
@@ -812,10 +966,69 @@ class DynamicWorkflowOrchestrator:
         return plots
     
     def _get_plot_title(self, plot_type: str) -> str:
-        """Get human-readable plot title"""
+        """Get user-readable plot title"""
         titles = {
             'psd': 'Power Spectral Density',
             'power_law': 'Power Law Fit',
             'bending_power_law': 'Bending Power Law Fit'
         }
         return titles.get(plot_type, plot_type.replace('_', ' ').title())
+    
+    def _calculate_total_tokens(self, workflow: Dict) -> int:
+        """
+        Calculate total tokens used across all workflow steps.
+        
+        Sums tokens from:
+        - AstroSage responses
+        - Classification agent (if tracked)
+        - Rewrite agent (if tracked)
+        
+        
+        Args:
+            workflow: Workflow dictionary containing completed_steps
+            
+        Returns:
+            Total token count across all steps
+        """
+    
+        total_tokens = 0
+        
+        try:
+            for step in workflow.get('completed_steps', []):
+                step_name = step.get('step')
+                
+                # AstroSage tokens (primary source)
+                if step_name == 'astrosage':
+                    tokens = step.get('tokens_used', 0)
+                    if isinstance(tokens, int) and tokens > 0:
+                        total_tokens += tokens
+                        logger.debug(f"AstroSage tokens: {tokens}")
+                
+                # Classification agent tokens
+                # elif step_name == 'classification':
+                #     result = step.get('classification_result', {})
+                #     tokens = result.get('tokens_used', 0)
+                #     if isinstance(tokens, int) and tokens > 0:
+                #         total_tokens += tokens
+                #         logger.debug(f"Classification tokens: {tokens}")
+                
+                # Rewrite agent tokens
+                # elif step_name == 'rewrite':
+                #     result = step.get('result', {})
+                #     if isinstance(result, dict):
+                #         tokens = result.get('tokens_used', 0)
+                #         if isinstance(tokens, int) and tokens > 0:
+                #             total_tokens += tokens
+                #             logger.debug(f"Rewrite tokens: {tokens}")
+                            
+            logger.info(f"Total tokens calculated: {total_tokens}")
+            return total_tokens
+            
+        except Exception as e:
+            logger.error(f"Error calculating total tokens: {e}", exc_info=True)
+            return 0
+    
+    def _calculate_cost(self, workflow: Dict) -> float:
+        """Estimate total cost"""
+        # Implement cost calculation based on tokens and models used
+        return 0.0  # Placeholder

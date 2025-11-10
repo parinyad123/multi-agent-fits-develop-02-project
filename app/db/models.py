@@ -17,6 +17,11 @@ from uuid import uuid4
 
 from app.db.base import Base
 
+from passlib.context import CryptContext
+
+# Password hashing context
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 # ============================================
 # Users Table
 # ============================================
@@ -26,10 +31,17 @@ class User(Base):
     
     user_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     username = Column(String(100), unique=True, nullable=True)
-    email = Column(String(255), unique=True, nullable=True)
+    email = Column(String(255), unique=True, nullable=False)
+
+    # Authentication fields
+    password_hash = Column(String(255), nullable=True)  # NULL = OAuth users (future)
+    is_active = Column(Boolean, default=True)
+
+    # Profile & timestamps
     preferences = Column(JSONB, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationships
     fits_files = relationship("FITSFile", back_populates="user", cascade="all, delete-orphan")
@@ -37,12 +49,24 @@ class User(Base):
     analyses = relationship("AnalysisHistory", back_populates="user", cascade="all, delete-orphan")
     workflows = relationship("WorkflowExecution", back_populates="user", cascade="all, delete-orphan")
     conversation_messages = relationship("ConversationMessage", back_populates="user", cascade="all, delete-orphan")
-    
+
     # Indexes
     __table_args__ = (
         Index("idx_user_username", "username"),
         Index("idx_user_email", "email"),
+        Index("idx_user_is_active", "is_active"),
     )
+
+    # Helper methods
+    def set_password(self, password: str):
+        """Hash and set password"""
+        self.password_hash = pwd_context.hash(password)
+    
+    def verify_password(self, password: str) -> bool:
+        """Verify password"""
+        if not self.password_hash:
+            return False
+        return pwd_context.verify(password, self.password_hash)
     
     def __repr__(self):
         return f"<User(user_id={self.user_id}, username={self.username})>"

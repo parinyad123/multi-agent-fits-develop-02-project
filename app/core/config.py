@@ -5,6 +5,7 @@ multi-agent-fits-dev-02/app/core/config.py
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
 from typing import Optional
+import secrets
 
 class Settings(BaseSettings):
     """Application configuration settings loaded from environment variables."""
@@ -34,7 +35,7 @@ class Settings(BaseSettings):
         env_file='.env',
         env_file_encoding='utf-8',
         case_sensitive=False,
-        extra='ignore'
+        extra='ignore'      # Ignore extra fields in .env
     )
 
     # AstroSage Service
@@ -61,6 +62,21 @@ class Settings(BaseSettings):
     # Cost tracking (optional)
     enable_cost_tracking: bool = True
     monthly_budget_limit: float = 100.0   # USD
+
+    # CORS Settings
+    cors_origins: list[str] = ["*"]
+
+    # JWT Settings
+    secret_key: str = secrets.token_urlsafe(32)  # Generate random key
+    algorithm: str = "HS256"
+    access_token_expire_hours: int = 8  # use for 8 hours (no need to refresh token)
+
+    # Password Settings
+    password_min_length: int = 8
+
+    class Config:
+        env_file = ".env"
+        case_sensitive = False
 
     @property
     def project_root(self) -> Path:

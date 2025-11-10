@@ -130,11 +130,27 @@ def get_orchestrator() -> DynamicWorkflowOrchestrator:
 
 # Include routers
 from app.api.v1 import analysis, files, plots, conversations  
+from app.api.v1.auth import routes as auth_routes
+
+# Include auth router
+app.include_router(
+    auth_routes.router,
+    prefix="/api/v1/auth",
+    tags=["authentication"]
+)
+
 app.include_router(analysis.router, prefix="/api/v1", tags=["analysis"])
 app.include_router(files.router, prefix="/api/v1/files", tags=["files"])
 app.include_router(plots.router, prefix="/api/v1", tags=["plots"])
 app.include_router(conversations.router, prefix="/api/v1", tags=["conversations"])
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Update in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 async def root():

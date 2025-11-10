@@ -19,6 +19,9 @@ from app.main import get_orchestrator
 
 from app.core.constants import AgentNames
 
+from app.core.auth import get_current_active_user
+from app.db.models import User
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -31,7 +34,7 @@ class ClassificationRequest(BaseModel):
     context: Optional[Dict[str, Any]] = None
 
 class AnalyzeRequest(BaseModel):
-    user_id: UUID
+    # user_id: UUID
     session_id: Optional[str] = None
     user_query: str
     fits_file_id: Optional[str] = None
@@ -46,21 +49,28 @@ async def test_classify(
 #    user_input: str,
 #    context: Optional[Dict[str, Any]] = None,
    request: ClassificationRequest,
+   current_user: User = Depends(get_current_active_user),
    orchestrator: DynamicWorkflowOrchestrator = Depends(get_orchestrator)
 ):
     """
     Test endpoint - Directly classify input using the classification agent.
     Not part of the main workflow.
+
+    **Requires Authentication**
     """
 
     classification_agent = orchestrator.agents.get(AgentNames.CLASSIFICATION)
 
     if not classification_agent:
-        raise HTTPException(status_code=503, detail="Classification agent not available")
-
-    # if context is None:
-    #     context = {}
+        raise HTTPException(
+            status_code=503, 
+            detail="Classification agent not available"
+            )
+    
     context = request.context or {}
+
+    context['user_id'] = str(current_user.user_id)
+    context['user_email'] = current_user.email
 
     try:
         result = await classification_agent.process_request(
@@ -70,7 +80,8 @@ async def test_classify(
 
         return {
             "success": True,
-            "classificartion": {
+            "user_id": str(current_user.user_id),
+            "classification": {
                 "primary_intent": result.primary_intent,
                 "analysis_types": result.analysis_types,
                 "routing_strategy": result.routing_strategy,
@@ -98,6 +109,7 @@ async def test_classify(
         }
 
     except Exception as e:
+        logger.error(f"Classification test failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -108,36 +120,54 @@ async def test_classify(
 @router.post("/workflow/analyze")
 async def submit_analysis(
     request: AnalyzeRequest,
+    current_user: User = Depends(get_current_active_user),  # Require auth
     orchestrator: DynamicWorkflowOrchestrator = Depends(get_orchestrator)
 ):
     """
     Submit a user request for analysis.
     This will initiate the full multi-agent workflow.
+    
+    **Requires Authentication**
+    
+    - **session_id**: Optional session ID (will generate new if not provided)
+    - **user_query**: User's question or request
+    - **fits_file_id**: Optional FITS file ID
+    - **context**: Optional additional context
     """
 
     context = request.context or {}
+
+    # ✅ Add user info to context
+    context['user_id'] = str(current_user.user_id)
+    context['user_email'] = current_user.email
 
     # Generate session_id if null (new chat)
     session_id = request.session_id or str(uuid4())
     is_new_session = request.session_id is None
 
     user_request = UserRequest(
-        user_id = request.user_id,
-        session_id = session_id,
-        request_id = str(uuid4()),
-        fits_file_id = request.fits_file_id,
-        user_query = request.user_query,
-        context = context,
+        # user_id = request.user_id,
+        user_id=current_user.user_id,   # Use user_id from JWT token (not from request body)
+        session_id=session_id,
+        request_id=str(uuid4()),
+        fits_file_id=request.fits_file_id,
+        user_query=request.user_query,
+        context=context,
     )
 
     try:
         task_id = await orchestrator.submit_request(user_request)
 
+        logger.info(
+            f"Analysis submitted: user={current_user.user_id}, "
+            f"task={task_id}, session={session_id}"
+        )
+
         return {
             "success": True,
             "task_id": task_id,
-            "user_id": str(user_request.user_id),
-            "session_id": user_request.session_id,
+            "user_id": str(current_user.user_id),
+            "session_id": session_id,
             "is_new_session": is_new_session,
             "status": "submitted",
             "message": "Request submitted successfully for processing.",
@@ -145,23 +175,29 @@ async def submit_analysis(
         }
 
     except Exception as e:
-        logger.error(f"Error submitting analysis request: {e}")
+        logger.error(f"Error submitting analysis request: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/analyze/{task_id}")
 async def get_analysis_status(
     task_id: str,
+    current_user: User = Depends(get_current_active_user),  # Require auth
     orchestrator: DynamicWorkflowOrchestrator = Depends(get_orchestrator)
 ):
     """
     Get the status and result of a submitted analysis task.
-    Check the status 
+    
+    **Requires Authentication**
+    
+    Note: Users can only view their own tasks (optional: add ownership check) 
     """
     try:
         status = await orchestrator.get_workflow_status(task_id)
 
         if not status:
             raise HTTPException(status_code=404, detail="Task not found")
+
+        logger.info(f"Status check: user={current_user.user_id}, task={task_id}")
 
         return {
             "task_id": status.task_id,
@@ -184,6 +220,7 @@ async def get_analysis_status(
 
 @router.get("/stats")
 async def get_classification_stats(
+    current_user: User = Depends(get_current_active_user),  # Require auth
     orchestrator: DynamicWorkflowOrchestrator = Depends(get_orchestrator)
 ):
     """

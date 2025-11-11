@@ -41,7 +41,7 @@ class User(Base):
     preferences = Column(JSONB, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_login_at = Column(DateTime(timezone=True), nullable=True)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationships
     fits_files = relationship("FITSFile", back_populates="user", cascade="all, delete-orphan")

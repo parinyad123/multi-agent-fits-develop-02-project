@@ -40,7 +40,7 @@ class ExpertiseAdapter:
                 "response_length": "comprehensive",
                 "include_analogies": True,
                 "simplify_equations": True,
-                "use_latex": True,  # NEW: Enable LaTeX for simple equations
+                "use_latex": True,  # Enable LaTeX for simple equations
                 "equation_complexity": "basic",  # Simple LaTeX only
                 "reference_level": "popular science",
                 "tone": "friendly and encouraging",

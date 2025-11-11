@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import get_async_session
-from app.services.simple_auth import SimpleAuthService
+from app.services.auth import AuthService
 from app.core.auth import get_current_active_user
 from app.api.v1.auth.schemas import (
     RegisterRequest,
@@ -47,7 +47,7 @@ async def register(
     """
     
     try:
-        user = await SimpleAuthService.create_user(
+        user = await AuthService.create_user(
             session=session,
             email=request.email,
             password=request.password,
@@ -56,7 +56,7 @@ async def register(
         
         await session.commit()
         
-        logger.info(f"✅ User registered: {user.email}")
+        logger.info(f"User registered: {user.email}")
         return user
         
     except ValueError as e:
@@ -65,7 +65,7 @@ async def register(
             detail=str(e)
         )
     except Exception as e:
-        logger.error(f"❌ Registration error: {e}", exc_info=True)
+        logger.error(f"Registration error: {e}", exc_info=True)
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -94,7 +94,7 @@ async def login(
     
     try:
         # Authenticate user
-        user = await SimpleAuthService.authenticate_user(
+        user = await AuthService.authenticate_user(
             session=session,
             email=request.email,
             password=request.password
@@ -108,11 +108,11 @@ async def login(
             )
         
         # Create access token
-        access_token = SimpleAuthService.create_access_token(user.user_id)
+        access_token = AuthService.create_access_token(user.user_id)
         
         await session.commit()
         
-        logger.info(f"✅ User logged in: {user.email}")
+        logger.info(f"User logged in: {user.email}")
         
         return TokenResponse(
             access_token=access_token,
@@ -123,7 +123,7 @@ async def login(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Login error: {e}", exc_info=True)
+        logger.error(f"Login error: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Login failed"

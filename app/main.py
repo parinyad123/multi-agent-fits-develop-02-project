@@ -89,7 +89,7 @@ async def lifespan(app: FastAPI):
         auto_upgrade=False
     )
     orchestrator.register_agent(AgentNames.REWRITE, rewrite_agent)
-    logger.info("✅ Rewrite Agent registered")
+    logger.info("Rewrite Agent registered")
 
     # Strat workers
     import asyncio

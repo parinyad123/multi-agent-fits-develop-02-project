@@ -1,4 +1,7 @@
 """
+Application Configuration
+Environment variables and settings
+
 multi-agent-fits-dev-02/app/core/config.py
 """
 
@@ -7,77 +10,106 @@ from pathlib import Path
 from typing import Optional
 import secrets
 
+
 class Settings(BaseSettings):
     """Application configuration settings loaded from environment variables."""
 
+    # ==========================================
     # API Keys
+    # ==========================================
     openai_api_key: str
 
-    # Storage Directories paths (as strings from .env)
+    # ==========================================
+    # Storage Directories (relative paths from .env)
+    # ==========================================
     fitsfiles_dir: str = "storage/fitsfiles"
     plots_dir: str = "storage/plots"
     plots_psd_dir: str = "storage/plots/psd"
     plots_powerlaw_dir: str = "storage/plots/power_law"
     plots_bendingpowerlaw_dir: str = "storage/plots/bending_power_law"
 
-    # Upload limits
-    max_upload_size: int = 536_870_912    # 500MB
+    # ==========================================
+    # Upload Limits
+    # ==========================================
+    max_upload_size: int = 10240  # 10MB
 
-    # Database settings
-    database_url: str = "postgresql+asyncpg://fits_user:fits_password@localhost:5432"
+    # ==========================================
+    # Database Settings
+    # ==========================================
+    database_url: str = "postgresql+asyncpg://fits_user:fits_password@localhost:5433/fits_analysis_db"
     database_echo: bool = False  # Set to True for SQL debugging
     database_pool_size: int = 20
     database_max_overflow: int = 10
     database_pool_recycle: int = 3600  # Recycle connections after 1 hour
     database_pool_pre_ping: bool = True  # Verify connections before using
 
-    model_config = SettingsConfigDict(
-        env_file='.env',
-        env_file_encoding='utf-8',
-        case_sensitive=False,
-        extra='ignore'      # Ignore extra fields in .env
-    )
-
+    # ==========================================
     # AstroSage Service
+    # ==========================================
     astrosage_base_url: str = "http://192.168.156.22:8080"
     astrosage_model: str = "astrosage"
     astrosage_timeout: int = 240  # seconds
     astrosage_max_retries: int = 3
     astrosage_retry_delay: int = 5  # seconds
 
-    # Conversation settings
+    # ==========================================
+    # Conversation Settings
+    # ==========================================
     conversation_history_limit: int = 10
 
-    # Default LLM parameters
+    # ==========================================
+    # Default LLM Parameters
+    # ==========================================
     astrosage_default_temperature: float = 0.2
     astrosage_default_max_tokens: int = 600
     astrosage_default_top_p: float = 0.95
 
-    # Rewrite Agent configuration
-    rewrite_model: str = "mini"           # "mini", "turbo", or "standard"
-    rewrite_auto_upgrade: bool = True     # Auto-upgrade for complex queries
+    # ==========================================
+    # Rewrite Agent Configuration
+    # ==========================================
+    rewrite_model: str = "mini"  # "mini", "turbo", or "standard"
+    rewrite_auto_upgrade: bool = True  # Auto-upgrade for complex queries
     rewrite_temperature: float = 0.3
     rewrite_max_tokens: int = 3000
     
-    # Cost tracking (optional)
+    # ==========================================
+    # Cost Tracking (optional)
+    # ==========================================
     enable_cost_tracking: bool = True
-    monthly_budget_limit: float = 100.0   # USD
+    monthly_budget_limit: float = 100.0  # USD
 
+    # ==========================================
     # CORS Settings
+    # ==========================================
     cors_origins: list[str] = ["*"]
 
-    # JWT Settings
-    secret_key: str = secrets.token_urlsafe(32)  # Generate random key
+    # ==========================================
+    # JWT Settings (NEW!)
+    # ==========================================
+    secret_key: str = "rohwLLiHvNZT-H6_fsxfDCZyx6ta_Da7S1PbbNVnuMc"  # Will be overridden by .env
     algorithm: str = "HS256"
-    access_token_expire_hours: int = 8  # use for 8 hours (no need to refresh token)
+    access_token_expire_hours: int = 8
 
-    # Password Settings
+    # ==========================================
+    # Password Settings (NEW!)
+    # ==========================================
     password_min_length: int = 8
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    # ==========================================
+    # Pydantic v2 Configuration
+    # ==========================================
+    model_config = SettingsConfigDict(
+        env_file='.env',
+        env_file_encoding='utf-8',
+        case_sensitive=False,
+        extra='ignore'  # Ignore extra fields in .env
+    )
 
+
+    # ==========================================
+    # Properties (Directory Paths)
+    # ==========================================
+    
     @property
     def project_root(self) -> Path:
         """Get the root directory of the project."""
@@ -108,6 +140,10 @@ class Settings(BaseSettings):
         """Get absolute path to bending power law plots directory"""
         return self.project_root / self.plots_bendingpowerlaw_dir
 
+    # ==========================================
+    # Helper Methods
+    # ==========================================
+    
     def ensure_directories(self) -> None:
         """Create all required directories if they don't exist"""
         directories = [
@@ -121,7 +157,12 @@ class Settings(BaseSettings):
         for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
 
-# Global settings instance
+
+# ==========================================
+# Global Settings Instance
+# ==========================================
+
 settings = Settings()
 
-    
+# Ensure directories exist on startup
+settings.ensure_directories()

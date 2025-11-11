@@ -121,6 +121,35 @@ class AuthService:
         return user
     
     @staticmethod
+    def create_access_token(user_id: UUID) -> str:
+        """
+        Create JWT access token
+        
+        Args:
+            user_id: User UUID
+            
+        Returns:
+            JWT token string
+        """
+        
+        expire = datetime.utcnow() + timedelta(hours=settings.access_token_expire_hours)
+        
+        to_encode = {
+            "sub": str(user_id),
+            "exp": expire,
+            "iat": datetime.utcnow()
+        }
+        
+        encoded_jwt = jwt.encode(
+            to_encode,
+            settings.secret_key,
+            algorithm=settings.algorithm
+        )
+        
+        logger.debug(f"Created access token for user: {user_id}")
+        return encoded_jwt
+    
+    @staticmethod
     def verify_access_token(token: str) -> Optional[UUID]:
         """
         Verify JWT access token

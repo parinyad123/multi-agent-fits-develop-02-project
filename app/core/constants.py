@@ -116,7 +116,7 @@ class ResourceLimits:
     MAX_WORKFLOW_MEMORY: Final[int] = 100
     MAX_WORKER_CONCURRENT: Final[int] = 20
     MAX_FILE_SIZE_MB: Final[int] = 512
-    MAX_UPLOAD_SIZE_BYTES: Final[int] = 536_870_912 # 512 MB
+    MAX_UPLOAD_SIZE_BYTES: Final[int] = 10_240 # 10 MB
 
 
 # ==================================

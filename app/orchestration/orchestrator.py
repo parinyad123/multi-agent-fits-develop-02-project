@@ -416,7 +416,10 @@ class DynamicWorkflowOrchestrator:
             #         current_step="classification",
             #         progress="10%"
             #     )
-            
+
+            # ========================================
+            # STEP 1: Create ONE database session
+            # ========================================
             async with AsyncSessionLocal() as session:
                 
                 # Store session in workflow context
@@ -436,28 +439,25 @@ class DynamicWorkflowOrchestrator:
                     user_query = user_request.user_query
                     context = user_request.context
                 
-                # ========================================
-                # STEP 1: Ensure Session Exists 
-                # ========================================
-                logger.info(f"Ensuring session exists for workflow {task_id}")
+                # logger.info(f"Ensuring session exists for workflow {task_id}")
                 
-                try:
-                    await self._ensure_session_exists(
-                        session_id=session_id,
-                        user_id=user_id,
-                        db_session=session
-                    )
-                except Exception as e:
-                    logger.error(f"Session management failed for {task_id}: {e}", exc_info=True)
+                # try:
+                #     await self._ensure_session_exists(
+                #         session_id=session_id,
+                #         user_id=user_id,
+                #         db_session=session
+                #     )
+                # except Exception as e:
+                #     logger.error(f"Session management failed for {task_id}: {e}", exc_info=True)
 
-                    # Save error to database before return
-                    await ConversationService.update_workflow_status(
-                        session=session,
-                        workflow_id=workflow_id,
-                        status=WorkflowStatusType.FAILED,
-                        error=f"Session error: {str(e)}"
-                    )
-                    await session.commit()
+                #     # Save error to database before return
+                #     await ConversationService.update_workflow_status(
+                #         session=session,
+                #         workflow_id=workflow_id,
+                #         status=WorkflowStatusType.FAILED,
+                #         error=f"Session error: {str(e)}"
+                #     )
+                #     await session.commit()
 
                     # Update in-memory
                     workflow['status'] = WorkflowStatusType.FAILED
@@ -937,7 +937,7 @@ class DynamicWorkflowOrchestrator:
                     result = step.get('analysis_result', {})
                     analysis_id = result.get('analysis_id')
                     if analysis_id:
-                        # ✅ FIX 7: Handle both string and UUID
+                        # Handle both string and UUID
                         if isinstance(analysis_id, str):
                             return UUID(analysis_id)
                         return analysis_id

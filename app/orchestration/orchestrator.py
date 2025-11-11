@@ -120,33 +120,98 @@ class DynamicWorkflowOrchestrator:
         # Create database session
         async with AsyncSessionLocal() as session:
 
-            # Create workflow execution record
-            workflow_id = await ConversationService.create_workflow_execution(
-                session=session,
-                user_id=user_request.user_id,
-                session_id=user_request.session_id,
-                user_query=user_request.user_query,
-                request_context=user_request.context,
-                file_id=UUID(user_request.fits_file_id.replace('.fits', '')) if user_request.fits_file_id else None
-            )
+            # ========================================
+            # STEP 1: Generate or use provided session_id
+            # ========================================
+            session_id = user_request.session_id or str(uuid4())
+            is_new_session = user_request.session_id is None
             
-            # Save user message
-            await ConversationService.save_user_message(
-                session=session,
-                session_id=user_request.session_id,
-                user_id=user_request.user_id,
-                workflow_id=workflow_id,
-                content=user_request.user_query
-            )
+            logger.info(f"Processing request: session_id={session_id}, is_new={is_new_session}")
             
-            await session.commit()
-            logger.info(f"Workflow created in database: {workflow_id}")
+            # ========================================
+            # STEP 2: Ensure Session Exists FIRST!
+            # ========================================
+            try:
+                # Check if session exists
+                result = await session.execute(
+                    select(SessionModel).where(SessionModel.session_id == session_id)
+                )
+                existing_session = result.scalar_one_or_none()
+                
+                if not existing_session:
+                    logger.info(f"Creating new session: {session_id}")
+                    
+                    # Create new session
+                    new_session = SessionModel(
+                        session_id=session_id,
+                        user_id=user_request.user_id,
+                        created_at=datetime.now(),
+                        last_activity_at=datetime.now(),
+                        is_active=True,
+                        session_metadata={}
+                    )
+                    
+                    session.add(new_session)
+                    await session.flush()
+                    
+                    logger.info(f"Session created successfully: {session_id}")
+                else:
+                    # Update last activity
+                    existing_session.last_activity_at = datetime.now()
+                    await session.flush()
+                    
+                    logger.debug(f"Session already exists, updated activity: {session_id}")
+                
+            except Exception as e:
+                logger.error(f"Failed to create/update session: {e}", exc_info=True)
+                await session.rollback()
+                raise RuntimeError(f"Session creation failed: {str(e)}") from e
 
-        # Initialize workflow in memory (with database ID)
+            # ========================================
+            # STEP 3: Now Create Workflow Execution
+            # ========================================
+            try:
+                workflow_id = await ConversationService.create_workflow_execution(
+                    session=session,
+                    user_id=user_request.user_id,
+                    session_id=session_id,
+                    user_query=user_request.user_query,
+                    request_context=user_request.context,
+                    file_id=UUID(user_request.fits_file_id.replace('.fits', '')) if user_request.fits_file_id else None
+                )
+                
+                # Save user message
+                await ConversationService.save_user_message(
+                    session=session,
+                    session_id=session_id,
+                    user_id=user_request.user_id,
+                    workflow_id=workflow_id,
+                    content=user_request.user_query
+                )
+                
+                await session.commit()
+                logger.info(f"✅ Workflow created in database: {workflow_id}")
+                
+            except Exception as e:
+                logger.error(f"Failed to create workflow: {e}", exc_info=True)
+                await session.rollback()
+                raise RuntimeError(f"Workflow creation failed: {str(e)}") from e
+
+        # ========================================
+        # STEP 4: Initialize workflow in memory
+        # ========================================
+        if is_new_session:
+            if isinstance(user_request, dict):
+                user_request['session_id'] = session_id
+            else:
+                user_request.session_id = session_id
+        
         workflow = {
             'task_id': task_id,
             'workflow_id': workflow_id,
             'user_request': user_request,
+            'session_id': session_id,
+            'is_new_session': is_new_session,
             'status': WorkflowStatusType.QUEUED,
             'routing_strategy': None,
             'current_step': None,
@@ -162,7 +227,8 @@ class DynamicWorkflowOrchestrator:
 
         # Enqueue the workflow for processing
         await self.main_queue.put(task_id)
-        logger.info(f"Workflow enqueued: {task_id}")
+        logger.info(f"Workflow enqueued: task_id={task_id}, session_id={session_id}")
+
 
         return task_id
 
@@ -460,16 +526,16 @@ class DynamicWorkflowOrchestrator:
                 #     await session.commit()
 
                     # Update in-memory
-                    workflow['status'] = WorkflowStatusType.FAILED
-                    workflow['error'] = f"Session error: {str(e)}"
-                    workflow['completed_at'] = datetime.now()
+                    # workflow['status'] = WorkflowStatusType.FAILED
+                    # workflow['error'] = f"Session error: {str(e)}"
+                    # workflow['completed_at'] = datetime.now()
 
-                    # Clean up session reference
-                    if '_db_session' in workflow:
-                        del workflow['_db_session']
+                    # # Clean up session reference
+                    # if '_db_session' in workflow:
+                    #     del workflow['_db_session']
 
-                    await self._add_to_memory(task_id, workflow)
-                    return
+                    # await self._add_to_memory(task_id, workflow)
+                    # return
                 
                 # ========================================
                 # STEP 2: CLASSIFICATION AGENT

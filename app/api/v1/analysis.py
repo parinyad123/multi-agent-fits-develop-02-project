@@ -137,7 +137,7 @@ async def submit_analysis(
 
     context = request.context or {}
 
-    # ✅ Add user info to context
+    # Add user info to context
     context['user_id'] = str(current_user.user_id)
     context['user_email'] = current_user.email
 

@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class RewritePromptBuilder:
     """Build GPT prompts for response rewriting"""
     
-    # ✅ FIX: Escape ALL curly braces that are NOT format placeholders
+    # FIX: Escape ALL curly braces that are NOT format placeholders
     SYSTEM_PROMPT_BASE = """You are an expert scientific response formatter for an astrophysics analysis system.
 
         Your role is to:
@@ -116,7 +116,7 @@ class RewritePromptBuilder:
             self.EXPERTISE_GUIDELINES["intermediate"]
         )
         
-        # ✅ Now this will work because we escaped {{}} in the template
+        # Now this will work because we escaped {{}} in the template
         return self.SYSTEM_PROMPT_BASE.format(
             expertise_level=expertise_level.upper(),
             expertise_guidelines=guidelines

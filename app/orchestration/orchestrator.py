@@ -468,21 +468,6 @@ class DynamicWorkflowOrchestrator:
 
             workflow_id = workflow.get('workflow_id')
 
-            # # Get database session
-            # async with AsyncSessionLocal() as session:
-                
-            #     # Store session in workflow context
-            #     workflow['_db_session'] = session
-
-            #     # Update status to in_progress
-            #     await ConversationService.update_workflow_status(
-            #         session=session,
-            #         workflow_id=workflow_id,
-            #         status=WorkflowStatusType.IN_PROGRESS,
-            #         current_step="classification",
-            #         progress="10%"
-            #     )
-
             # ========================================
             # STEP 1: Create ONE database session
             # ========================================
@@ -504,38 +489,6 @@ class DynamicWorkflowOrchestrator:
                     user_id = user_request.user_id
                     user_query = user_request.user_query
                     context = user_request.context
-                
-                # logger.info(f"Ensuring session exists for workflow {task_id}")
-                
-                # try:
-                #     await self._ensure_session_exists(
-                #         session_id=session_id,
-                #         user_id=user_id,
-                #         db_session=session
-                #     )
-                # except Exception as e:
-                #     logger.error(f"Session management failed for {task_id}: {e}", exc_info=True)
-
-                #     # Save error to database before return
-                #     await ConversationService.update_workflow_status(
-                #         session=session,
-                #         workflow_id=workflow_id,
-                #         status=WorkflowStatusType.FAILED,
-                #         error=f"Session error: {str(e)}"
-                #     )
-                #     await session.commit()
-
-                    # Update in-memory
-                    # workflow['status'] = WorkflowStatusType.FAILED
-                    # workflow['error'] = f"Session error: {str(e)}"
-                    # workflow['completed_at'] = datetime.now()
-
-                    # # Clean up session reference
-                    # if '_db_session' in workflow:
-                    #     del workflow['_db_session']
-
-                    # await self._add_to_memory(task_id, workflow)
-                    # return
                 
                 # ========================================
                 # STEP 2: CLASSIFICATION AGENT

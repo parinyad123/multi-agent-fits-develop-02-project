@@ -1,16 +1,7 @@
 #!/usr/bin/env python3
 """
-FIXED VERSION v2.2 - Enhanced Mixed Request Detection for Astrophysics Interpretation
-=======================================
-✅ FIX: Properly detects mixed requests with astrophysics interpretation
-✅ NEW: Post-processing validation to catch missed mixed requests
-✅ ENHANCED: Domain-specific patterns for accretion physics, MRI turbulence, etc.
+multi-agent-fits-dev-02/app/agent/classification_parameter/unified_FITS_classification_parameter_agent.py
 
-Changes from v2.1:
-1. Added astrophysics-specific mixed request patterns
-2. Added post-processing detection method
-3. Enhanced examples with real astrophysics use cases
-4. Improved logging for debugging misclassifications
 """
 
 import asyncio
@@ -31,6 +22,11 @@ except ImportError:
 
 from langchain.schema import HumanMessage, SystemMessage
 from langchain_community.callbacks.manager import get_openai_callback
+
+from app.services.conversation_history_service import (
+    ConversationHistoryService,
+    ConversationMessageDTO
+)
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -464,10 +460,22 @@ class UnifiedFITSClassificationAgent:
     
     async def process_request(self, 
                             user_input: str, 
-                            context: Dict[str, Any] = None) -> UnifiedFITSResult:
+                            context: Dict[str, Any] = None,
+                            # history support
+                            session = None,  # AsyncSession
+                            session_id: Optional[str] = None) -> UnifiedFITSResult:
         """
         Main processing method with FIXED mixed request detection
+
+        Main processing method with history support
+    
+        Args:
+            user_input: User query
+            context: Additional context
+            session: Database session (for history loading)
+            session_id: Session ID (for history loading)
         """
+
         if context is None:
             context = {}
         
@@ -476,8 +484,26 @@ class UnifiedFITSClassificationAgent:
         
         # Clean cache
         self._cleanup_cache()
+
+        # Load conversation history if available
+        history_context = {}
+        if session and session_id:
+            try:
+                history_context = await self._load_history_context(
+                    session=session,
+                    session_id=session_id,
+                    file_id=context.get("file_id")
+                )
+                
+                # Enhance context with history
+                context["has_history"] = history_context.get("has_history", False)
+                context["last_parameters"] = history_context.get("last_parameters")
+                
+            except Exception as e:
+                self.logger.warning(f"Failed to load history: {e}")
+                history_context = {"has_history": False}
         
-        # Check cache
+        # Check cache (include history in cache key)
         cache_key = self._generate_cache_key(user_input, context)
         if cache_key in self.cache:
             self.stats["cache_hits"] += 1
@@ -488,7 +514,7 @@ class UnifiedFITSClassificationAgent:
         
         try:
             # Build prompt
-            full_prompt = self._build_unified_prompt(user_input, context)
+            full_prompt = self._build_unified_prompt(user_input, context, history_context)
             
             # LLM call
             with get_openai_callback() as cb:
@@ -510,8 +536,16 @@ class UnifiedFITSClassificationAgent:
             
             # Parse response
             result = self._parse_unified_response(raw_output)
+
+            # Apply parameter inheritance from history
+            if history_context.get("has_history"):
+                result = await self._apply_parameter_inheritance(
+                    result=result,
+                    history_context=history_context,
+                    user_input=user_input
+                )
             
-            # ✅ CRITICAL FIX: Post-processing detection of missed mixed requests
+            # Post-processing detection of missed mixed requests
             result = self._detect_missed_mixed_requests(result, user_input)
             
             # Enhance with metadata
@@ -557,13 +591,13 @@ class UnifiedFITSClassificationAgent:
     
     def _detect_missed_mixed_requests(self, result: UnifiedFITSResult, user_input: str) -> UnifiedFITSResult:
         """
-        ✅ CRITICAL FIX: Post-processing to catch mixed requests that LLM misclassified
+        CRITICAL FIX: Post-processing to catch mixed requests that LLM misclassified
         
         This method validates LLM classification and corrects false negatives where:
         - User requests analysis + astrophysics interpretation
         - LLM incorrectly classified as pure "analysis"
         
-        🚨 IMPORTANT: Only correct "analysis" to "mixed"
+        IMPORTANT: Only correct "analysis" to "mixed"
         - Do NOT change "general" to "mixed" (pure questions stay pure)
         """
         
@@ -571,14 +605,14 @@ class UnifiedFITSClassificationAgent:
         if result.primary_intent != "analysis" or result.is_mixed_request:
             return result  # Already mixed or general, no correction needed
         
-        # 🚨 CRITICAL: Must have analysis types to be mixed
+        # CRITICAL: Must have analysis types to be mixed
         # If no analysis types, it's a pure question, not mixed
         if not result.analysis_types:
             return result  # No analysis = pure question, don't touch
         
         user_input_lower = user_input.lower()
         
-        # 🔬 Astrophysics interpretation keywords
+        # Astrophysics interpretation keywords
         astro_interpretation_keywords = [
             # Accretion physics
             "accretion regime", "accretion disk", "accretion flow", "accretion state",
@@ -652,8 +686,13 @@ class UnifiedFITSClassificationAgent:
         
         return result
     
-    def _build_unified_prompt(self, user_input: str, context: Dict[str, Any]) -> str:
-        """Build comprehensive prompt"""
+    def _build_unified_prompt(
+        self, 
+        user_input: str, 
+        context: Dict[str, Any],
+        history_context: Dict[str, Any] = None
+    ) -> str:
+        """Build comprehensive prompt with history"""
         
         # Build context section
         context_info = []
@@ -669,8 +708,44 @@ class UnifiedFITSClassificationAgent:
         if context.get("previous_analyses"):
             prev = ", ".join(context["previous_analyses"])
             context_info.append(f"📊 Previous analyses: {prev}")
+
+        # ✅ NEW: Add history information
+        if history_context.get("has_history"):
+            context_info.append("📝 Conversation history available")
+            
+            # Add last parameters info
+            last_params = history_context.get("last_parameters")
+            if last_params:
+                param_types = [k for k in last_params.keys() if not k.startswith("_")]
+                if param_types:
+                    context_info.append(f"🔧 Last used parameters: {', '.join(param_types)}")
+                    
+                    # Show last parameter values (brief)
+                    for ptype in param_types:
+                        params = last_params[ptype]
+                        key_params = {k: v for k, v in params.items() 
+                                    if k in ["bins", "A0", "b0", "fb0", "low_freq", "high_freq"]}
+                        if key_params:
+                            context_info.append(f"   {ptype}: {key_params}")
         
-        return f"""
+        # return f"""
+        #     UNIFIED FITS ANALYSIS REQUEST
+
+        #     USER INPUT: "{user_input}"
+
+        #     CONTEXT INFORMATION:
+        #     {chr(10).join(context_info) if context_info else "No additional context"}
+
+        #     TASK: Provide comprehensive classification, question categorization, and parameter extraction.
+
+        #     🚨 CRITICAL: Pay special attention to astrophysics interpretation requests!
+        #     - If user asks to "discuss", "explain", "compare" physical processes → MIXED
+        #     - If user mentions accretion/turbulence/spectral physics → MIXED
+        #     - Analysis + interpretation = ALWAYS MIXED
+
+        #     RESPOND WITH COMPLETE JSON:
+        #     """
+        prompt = f"""
             UNIFIED FITS ANALYSIS REQUEST
 
             USER INPUT: "{user_input}"
@@ -680,13 +755,34 @@ class UnifiedFITSClassificationAgent:
 
             TASK: Provide comprehensive classification, question categorization, and parameter extraction.
 
-            🚨 CRITICAL: Pay special attention to astrophysics interpretation requests!
-            - If user asks to "discuss", "explain", "compare" physical processes → MIXED
-            - If user mentions accretion/turbulence/spectral physics → MIXED
-            - Analysis + interpretation = ALWAYS MIXED
-
-            RESPOND WITH COMPLETE JSON:
+            🚨 HISTORY CONTEXT:
             """
+        
+        # ✅ NEW: Add formatted history if available
+        if history_context.get("has_history"):
+            prompt += """
+                ✅ User has previous analyses in this session.
+                - If user says "again", "same", "repeat", "last settings" → they want to reuse parameters
+                - Only extract explicitly mentioned NEW parameter values
+                - Mark inherited parameters appropriately
+                """
+        else:
+            prompt += """
+                ❌ No previous history available.
+                - Extract all parameters from query or use defaults
+                """
+        
+        prompt += """
+
+                🚨 CRITICAL: Pay special attention to astrophysics interpretation requests!
+                - If user asks to "discuss", "explain", "compare" physical processes → MIXED
+                - If user mentions accretion/turbulence/spectral physics → MIXED
+                - Analysis + interpretation = ALWAYS MIXED
+
+                RESPOND WITH COMPLETE JSON:
+                """
+        
+        return prompt
     
     def _parse_unified_response(self, raw_output: str) -> UnifiedFITSResult:
         """Parse LLM JSON response"""
@@ -925,7 +1021,10 @@ class UnifiedFITSClassificationAgent:
         context_key = {
             "has_files": context.get("has_uploaded_files", False),
             "expertise": context.get("user_expertise", "intermediate"),
-            "prev_analyses": sorted(context.get("previous_analyses", []))
+            "prev_analyses": sorted(context.get("previous_analyses", [])),
+            # Include history in cache key
+            "has_history": context.get("has_history", False),
+            "last_params": bool(context.get("last_parameters"))
         }
         
         combined = f"{normalized_input}:{json.dumps(context_key, sort_keys=True)}"
@@ -962,6 +1061,147 @@ class UnifiedFITSClassificationAgent:
         self.cache.clear()
         self.cache_timestamps.clear()
         self.logger.info("Cache cleared")
+
+    async def _load_history_context(
+        self,
+        session,
+        session_id: str,
+        file_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Load conversation history context.
+        
+        Returns:
+            Dictionary with messages and last_parameters
+        """
+        
+        try:
+            # Load recent messages
+            messages = await ConversationHistoryService.get_recent_messages(
+                session=session,
+                session_id=session_id,
+                limit=5,  # Last 5 messages for context
+                include_system=False,
+                max_tokens=1000
+            )
+            
+            # Load last parameters
+            last_parameters = None
+            
+            if file_id:
+                # Try file-specific first
+                last_parameters = await ConversationHistoryService.get_last_parameters(
+                    session=session,
+                    session_id=session_id,
+                    file_id=file_id,
+                    scope="file",
+                    search_depth=5
+                )
+            
+            # Fallback to session-wide
+            if not last_parameters:
+                last_parameters = await ConversationHistoryService.get_last_parameters(
+                    session=session,
+                    session_id=session_id,
+                    scope="session",
+                    search_depth=5
+                )
+            
+            return {
+                "messages": messages,
+                "last_parameters": last_parameters,
+                "has_history": len(messages) > 0 or last_parameters is not None
+            }
+            
+        except Exception as e:
+            self.logger.warning(f"Failed to load history context: {e}")
+            return {
+                "messages": [],
+                "last_parameters": None,
+                "has_history": False
+            }
+        
+    async def _apply_parameter_inheritance(
+        self,
+        result: UnifiedFITSResult,
+        history_context: Dict[str, Any],
+        user_input: str
+    ) -> UnifiedFITSResult:
+        """
+        Apply parameter inheritance from history when appropriate.
+        
+        Detects phrases like:
+        - "again"
+        - "same parameters"
+        - "use last settings"
+        - "same but bins=4000"
+        """
+        
+        user_input_lower = user_input.lower()
+        last_parameters = history_context.get("last_parameters")
+        
+        # Check for inheritance intent
+        inheritance_keywords = [
+            "again", "same", "last", "previous", "repeat",
+            "use same", "same parameters", "last settings"
+        ]
+        
+        should_inherit = any(keyword in user_input_lower for keyword in inheritance_keywords)
+        
+        if not should_inherit or not last_parameters:
+            return result  # No inheritance needed
+        
+        self.logger.info(f"Applying parameter inheritance from history")
+        
+        # For each analysis type, inherit parameters
+        for analysis_type in result.analysis_types:
+            if analysis_type in last_parameters:
+                # Get inherited parameters
+                inherited_params = last_parameters[analysis_type].copy()
+                
+                # Remove metadata fields
+                inherited_params.pop("_inherited", None)
+                inherited_params.pop("_overridden_fields", None)
+                
+                # Get current parameters (explicit overrides)
+                current_params = result.parameters.get(analysis_type, {})
+                
+                # Merge: start with inherited, apply overrides
+                merged_params = inherited_params.copy()
+                overridden_fields = []
+                
+                for key, value in current_params.items():
+                    if key in merged_params and merged_params[key] != value:
+                        overridden_fields.append(key)
+                    merged_params[key] = value
+                
+                # Update result
+                result.parameters[analysis_type] = merged_params
+                result.parameter_source[analysis_type] = "inherited"
+                
+                # Track overrides
+                if overridden_fields:
+                    result.parameters[analysis_type]["_overridden_fields"] = overridden_fields
+                    result.parameter_source[analysis_type] = "inherited_with_overrides"
+                
+                # Add metadata
+                if "_metadata" in last_parameters:
+                    result.parameters[analysis_type]["_inherited_from"] = {
+                        "analysis_id": last_parameters["_metadata"].get("analysis_id"),
+                        "timestamp": last_parameters["_metadata"].get("timestamp"),
+                        "position": last_parameters["_metadata"].get("search_position")
+                    }
+                
+                self.logger.info(
+                    f"Inherited {analysis_type} parameters "
+                    f"(overridden: {overridden_fields})"
+                )
+        
+        # Update reasoning
+        if result.reasoning:
+            result.reasoning += " [Parameters inherited from previous analysis]"
+        
+        return result
 
 
 # ============================================

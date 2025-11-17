@@ -79,6 +79,9 @@ class DynamicWorkflowOrchestrator:
     - Complete database persistence
     - Resource management with semaphores
     - In-memory caching for active workflows
+    - Classification Agent can access conversation history
+    - Parameter inheritance from previous analyses
+    - Single database session per workflow
     """
 
     def __init__(self):
@@ -97,6 +100,13 @@ class DynamicWorkflowOrchestrator:
 
         # Agent registry
         self.agents = {} # Will be registered later
+
+        self.main_queue = asyncio.Queue()
+        self.shared_llm_semaphore = asyncio.Semaphore(ResourceLimits.MAX_GPT_CONCURRENT)
+        self.astrosage_semaphore = asyncio.Semaphore(ResourceLimits.MAX_ASTROSAGE_CONCURRENT)
+        self.workflow_results = OrderedDict()
+        self.workflow_lock = asyncio.Lock()
+        self.agents = {}
 
     def register_agent(self, name: str, agent: Any):
         """Resister an agent with validation"""
@@ -484,11 +494,13 @@ class DynamicWorkflowOrchestrator:
                     user_id = user_request.get('user_id')
                     user_query = user_request.get('user_query')
                     context = user_request.get('context', {})
+                    file_id = user_request.get('fits_file_id')
                 else:
                     session_id = user_request.session_id or str(uuid4())
                     user_id = user_request.user_id
                     user_query = user_request.user_query
                     context = user_request.context
+                    file_id = user_request.fits_file_id
                 
                 # ========================================
                 # STEP 2: CLASSIFICATION AGENT
@@ -511,10 +523,17 @@ class DynamicWorkflowOrchestrator:
                 if not classification_agent:
                     raise ValueError(ErrorMessages.AGENT_NOT_FOUND.format(AgentNames.CLASSIFICATION))
                 
+                # Add file_id to context
+                if file_id:
+                    context['file_id'] = file_id
+                
                 async with self.shared_llm_semaphore:
+                    # Pass session and session_id to Classification Agent
                     classification_result = await classification_agent.process_request(
                         user_input=user_query,
-                        context=context
+                        context=context,
+                        session=session,  #  Pass database session
+                        session_id=session_id  # Pass session ID
                     )
                 
                 routing_strategy = RoutingStrategy(classification_result.routing_strategy)

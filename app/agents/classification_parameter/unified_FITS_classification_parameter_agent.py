@@ -1128,80 +1128,195 @@ class UnifiedFITSClassificationAgent:
         user_input: str
     ) -> UnifiedFITSResult:
         """
-        Apply parameter inheritance from history when appropriate.
+        Enhanced inheritance logic with context-aware keyword detection.
         
-        Detects phrases like:
-        - "again"
-        - "same parameters"
-        - "use last settings"
-        - "same but bins=4000"
+        Handles mixed requests by separating:
+        1. Analysis instruction (affects inheritance)
+        2. Question/explanation part (ignore for inheritance)
         """
         
-        user_input_lower = user_input.lower()
         last_parameters = history_context.get("last_parameters")
         
-        # Check for inheritance intent
+        if not last_parameters:
+            return result
+        
+        # ========================================
+        # STEP 1: Extract Analysis Instruction Part
+        # ========================================
+        analysis_part = self._extract_analysis_instruction(
+            user_input=user_input,
+            is_mixed_request=result.is_mixed_request,
+            routing_strategy=result.routing_strategy
+        )
+        
+        self.logger.info(f"Analysis part: '{analysis_part}'")
+        
+        # ========================================
+        # STEP 2: Check Keywords in Analysis Part ONLY
+        # ========================================
+        analysis_lower = analysis_part.lower()
+        
+        # Reset keywords
+        reset_keywords = [
+            "reset", "default", "defaults", "fresh", "new",
+            "from scratch", "start over", "clear parameters"
+        ]
+        
+        has_reset = any(kw in analysis_lower for kw in reset_keywords)
+        
+        if has_reset:
+            self.logger.info(
+                f"🔄 Reset keyword in ANALYSIS part → Don't inherit"
+            )
+            return result
+        
+        # Inheritance keywords
         inheritance_keywords = [
-            "again", "same", "last", "previous", "repeat",
+            "again", "same", "repeat", "last", "previous",
             "use same", "same parameters", "last settings"
         ]
         
-        should_inherit = any(keyword in user_input_lower for keyword in inheritance_keywords)
+        has_explicit_inherit = any(kw in analysis_lower for kw in inheritance_keywords)
         
-        if not should_inherit or not last_parameters:
-            return result  # No inheritance needed
+        # Same type check
+        has_matching_type = any(
+            atype in last_parameters 
+            for atype in result.analysis_types
+        )
         
-        self.logger.info(f"Applying parameter inheritance from history")
+        # ========================================
+        # STEP 3: Decide Inheritance
+        # ========================================
+        should_inherit = has_explicit_inherit or has_matching_type
         
-        # For each analysis type, inherit parameters
-        for analysis_type in result.analysis_types:
-            if analysis_type in last_parameters:
-                # Get inherited parameters
-                inherited_params = last_parameters[analysis_type].copy()
-                
-                # Remove metadata fields
-                inherited_params.pop("_inherited", None)
-                inherited_params.pop("_overridden_fields", None)
-                
-                # Get current parameters (explicit overrides)
-                current_params = result.parameters.get(analysis_type, {})
-                
-                # Merge: start with inherited, apply overrides
-                merged_params = inherited_params.copy()
-                overridden_fields = []
-                
-                for key, value in current_params.items():
-                    if key in merged_params and merged_params[key] != value:
-                        overridden_fields.append(key)
-                    merged_params[key] = value
-                
-                # Update result
-                result.parameters[analysis_type] = merged_params
-                result.parameter_source[analysis_type] = "inherited"
-                
-                # Track overrides
-                if overridden_fields:
-                    result.parameters[analysis_type]["_overridden_fields"] = overridden_fields
-                    result.parameter_source[analysis_type] = "inherited_with_overrides"
-                
-                # Add metadata
-                if "_metadata" in last_parameters:
-                    result.parameters[analysis_type]["_inherited_from"] = {
-                        "analysis_id": last_parameters["_metadata"].get("analysis_id"),
-                        "timestamp": last_parameters["_metadata"].get("timestamp"),
-                        "position": last_parameters["_metadata"].get("search_position")
-                    }
-                
-                self.logger.info(
-                    f"Inherited {analysis_type} parameters "
-                    f"(overridden: {overridden_fields})"
-                )
-        
-        # Update reasoning
-        if result.reasoning:
-            result.reasoning += " [Parameters inherited from previous analysis]"
+        if should_inherit:
+            self.logger.info(
+                f"✅ Inheritance: explicit={has_explicit_inherit}, "
+                f"implicit={has_matching_type}"
+            )
+            return self._apply_inheritance(result, last_parameters)
         
         return result
+
+    def _extract_analysis_instruction(
+        self,
+        user_input: str,
+        is_mixed_request: bool,
+        routing_strategy: str
+    ) -> str:
+        """
+        Extract the analysis instruction part from user query.
+        
+        For mixed requests, separate analysis from question/explanation.
+        
+        Examples:
+            "Fit power law. Then explain..." → "Fit power law"
+            "Compute PSD and discuss how..." → "Compute PSD"
+            "Calculate statistics, then compare..." → "Calculate statistics"
+        """
+        
+        if not is_mixed_request or routing_strategy != "mixed":
+            # Pure analysis or pure question → use full input
+            return user_input
+        
+        # ========================================
+        # Split patterns for mixed requests
+        # ========================================
+        split_patterns = [
+            # Explicit separators
+            r'[.!?]\s*then\s+',           # ". Then explain"
+            r'[.!?]\s*and\s+then\s+',     # ". And then discuss"
+            r'[.!?]\s*after\s+that\s+',   # ". After that compare"
+            
+            # Conjunctions introducing questions
+            r'\.\s*explain\s+',           # ". Explain how"
+            r'\.\s*discuss\s+',           # ". Discuss how"
+            r'\.\s*tell\s+me\s+',         # ". Tell me about"
+            r'\.\s*what\s+',              # ". What does"
+            r'\.\s*how\s+',               # ". How does"
+            r'\.\s*why\s+',               # ". Why is"
+            r'\.\s*compare\s+',           # ". Compare how"
+            
+            # Comma-based separators
+            r',\s*then\s+',               # ", then explain"
+            r',\s*and\s+explain\s+',      # ", and explain"
+            r',\s*and\s+discuss\s+',      # ", and discuss"
+        ]
+        
+        import re
+        
+        for pattern in split_patterns:
+            match = re.search(pattern, user_input, re.IGNORECASE)
+            if match:
+                # Extract part before separator
+                analysis_part = user_input[:match.start() + 1]  # Include punctuation
+                
+                self.logger.debug(
+                    f"Split at '{match.group()}': "
+                    f"analysis='{analysis_part[:50]}...'"
+                )
+                
+                return analysis_part.strip()
+        
+        # ========================================
+        # Fallback: Use LLM to split (if no pattern matched)
+        # ========================================
+        if len(user_input) > 100:  # Only for longer queries
+            self.logger.debug("No split pattern matched, using LLM")
+            return self._llm_extract_analysis_instruction(user_input)
+        
+        # Default: use full input
+        return user_input
+
+
+    def _llm_extract_analysis_instruction(self, user_input: str) -> str:
+        """
+        Use LLM to extract analysis instruction from mixed request.
+        
+        This is a fallback for complex cases.
+        """
+        
+        prompt = f"""Extract ONLY the analysis/computation instruction from this user query.
+
+    User Query: "{user_input}"
+
+    Task: Extract the part that requests data analysis/computation.
+    Ignore the explanation/question part.
+
+    Examples:
+    Input: "Fit power law with 5000 bins. Then explain how this relates to accretion physics."
+    Output: "Fit power law with 5000 bins"
+
+    Input: "Compute PSD and discuss how the spectral slopes vary."
+    Output: "Compute PSD"
+
+    Input: "Calculate statistics, then compare with previous observations."
+    Output: "Calculate statistics"
+
+    Now extract from the user query above.
+    Respond with ONLY the extracted instruction (no quotes, no explanation).
+    """
+        
+        try:
+            messages = [
+                SystemMessage(content="You extract analysis instructions from text."),
+                HumanMessage(content=prompt)
+            ]
+            
+            response = self.llm.generate([messages])
+            extracted = response.generations[0][0].text.strip()
+            
+            # Remove quotes if present
+            extracted = extracted.strip('"\'')
+            
+            self.logger.debug(f"LLM extracted: '{extracted}'")
+            
+            return extracted
+            
+        except Exception as e:
+            self.logger.error(f"LLM extraction failed: {e}")
+            # Fallback: use full input
+            return user_input
 
 
 # ============================================

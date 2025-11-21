@@ -29,21 +29,21 @@ class GPTRewriteAgent:
         "mini": {
             "name": "gpt-4o-mini",
             "temperature": 0.3,
-            "max_tokens": 3000,
+            "max_tokens": 6000,
             "cost_per_1k_input": 0.00015,
             "cost_per_1k_output": 0.0006
         },
         "turbo": {
             "name": "gpt-3.5-turbo",
             "temperature": 0.3,
-            "max_tokens": 3000,
+            "max_tokens": 4096,
             "cost_per_1k_input": 0.0005,
             "cost_per_1k_output": 0.0015
         },
         "standard": {
             "name": "gpt-4o",
             "temperature": 0.3,
-            "max_tokens": 3000,
+            "max_tokens": 8000,
             "cost_per_1k_input": 0.005,
             "cost_per_1k_output": 0.015
         }

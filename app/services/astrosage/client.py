@@ -13,6 +13,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.constants import RoutingStrategy
 from app.services.astrosage.models import (
     AstroSageRequest,
     AstroSageResponse,
@@ -46,7 +47,8 @@ class AstroSageClient:
     async def query(
         self,
         request: AstroSageRequest,
-        db_session: AsyncSession
+        db_session: AsyncSession,
+        routing_strategy: RoutingStrategy
     ) -> AstroSageResponse:
         """
         Main entry point: Query AstroSage LLM
@@ -68,7 +70,8 @@ class AstroSageClient:
         
         logger.info(
             f"Processing AstroSage query: session={request.session_id}, "
-            f"expertise={request.expertise_level.value}"
+            f"expertise={request.expertise_level.value}, "
+            f"strategy={routing_strategy.value}"
         )
 
         try:
@@ -94,7 +97,7 @@ class AstroSageClient:
             # ========================================
             # STEP 3: Build prompt
             # ========================================
-            messages = PromptBuilder.build_full_prompt(request)
+            messages = PromptBuilder.build_full_prompt(request, routing_strategy)
             
             # ========================================
             # STEP 4: Get LLM config for expertise level

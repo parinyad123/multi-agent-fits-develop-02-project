@@ -502,11 +502,114 @@ class FittingCapability(AnalysisCapability):
 # Metadata Capability
 # ==========================================
 
+# class MetadataCapability(AnalysisCapability):
+#     """Extract FITS file metadata"""
+    
+#     def __init__(self):
+#         super().__init__("metadata")
+    
+#     async def execute(
+#         self, 
+#         rate_data: np.ndarray, 
+#         parameters: Dict[str, Any],
+#         **kwargs
+#     ) -> Tuple[Dict[str, Any], Optional[str]]:
+#         """
+#         Extract metadata from file record
+#         Note: rate_data not used for metadata extraction
+#         """
+#         file_record = kwargs.get("file_record")
+        
+#         if not file_record:
+#             raise ValueError("file_record required for metadata extraction")
+        
+#         self.logger.info(f"Extracting metadata from file: {file_record.file_id}")
+        
+#         result = {
+#             "file_id": str(file_record.file_id),
+#             "original_filename": file_record.original_filename,
+#             "metadata_filename": file_record.metadata_filename,
+#             "file_size": file_record.file_size,
+#             "uploaded_at": file_record.uploaded_at.isoformat(),
+#             "is_valid": file_record.is_valid,
+#             "validation_status": file_record.validation_status,
+#             "fits_metadata": file_record.fits_metadata,
+#             "data_info": file_record.data_info
+#         }
+        
+#         self.logger.info("Metadata extraction completed")
+        
+#         return (result, None)  # No plot for metadataa
+
 class MetadataCapability(AnalysisCapability):
-    """Extract FITS file metadata"""
+    """
+    Extract FITS file metadata with enhanced analysis context
+    
+    Provides three levels of metadata:
+    1. critical_fields: Essential observation parameters
+    2. derived_quantities: Computed values for analysis interpretation
+    3. source_context: Known source information from literature
+    """
+    
+    # Database of known sources
+    KNOWN_SOURCES = {
+        'IRAS 13224-3809': {
+            'type': 'Narrow-Line Seyfert 1 (NLS1) AGN',
+            'redshift': 0.06576,
+            'typical_luminosity': '~10^44 erg/s',
+            'black_hole_mass_solar': 2e6,
+            'characteristics': [
+                'Extreme X-ray variability',
+                'Soft X-ray excess',
+                'Relativistic reflection features'
+            ],
+            'typical_psd': {
+                'power_law_index_range': [1.2, 1.8],
+                'break_frequency_range': [1e-4, 1e-3],
+                'notes': 'Often shows bending power law with break around few × 10⁻⁴ Hz'
+            },
+            'key_references': [
+                'Alston et al. (2020) MNRAS 482, 2088',
+                'Chiang et al. (2015) MNRAS 446, 759',
+                'Fabian et al. (2013) MNRAS 429, 2917'
+            ]
+        },
+        'Cyg X-1': {
+            'type': 'Black hole X-ray binary',
+            'black_hole_mass_solar': 21.2,
+            'characteristics': [
+                'Hard and soft spectral states',
+                'Strong QPOs in hard state',
+                'Persistent source'
+            ],
+            'typical_psd': {
+                'power_law_index_range': [0.7, 1.5],
+                'break_frequency_range': [0.01, 1.0],
+                'notes': 'State-dependent PSD shape'
+            },
+            'key_references': [
+                'Nowak et al. (1999) ApJ 510, 874'
+            ]
+        },
+        'GRS 1915+105': {
+            'type': 'Black hole X-ray binary',
+            'black_hole_mass_solar': 12.4,
+            'characteristics': [
+                'Multiple variability classes',
+                'Superluminal jets',
+                'Extreme luminosity'
+            ],
+            'typical_psd': {
+                'power_law_index_range': [0.5, 1.5],
+                'break_frequency_range': [0.001, 0.1],
+                'notes': 'Highly variable PSD depending on state'
+            }
+        }
+    }
     
     def __init__(self):
         super().__init__("metadata")
+
     
     async def execute(
         self, 
@@ -515,17 +618,27 @@ class MetadataCapability(AnalysisCapability):
         **kwargs
     ) -> Tuple[Dict[str, Any], Optional[str]]:
         """
-        Extract metadata from file record
-        Note: rate_data not used for metadata extraction
+        Extract metadata WITH analysis-relevant computed fields
+        
+        Returns:
+            Tuple of (result_dict, None)
+            result_dict contains:
+            - Basic metadata (file info)
+            - critical_fields (essential parameters)
+            - derived_quantities (computed values)
+            - source_context (literature info)
         """
         file_record = kwargs.get("file_record")
         
         if not file_record:
             raise ValueError("file_record required for metadata extraction")
         
-        self.logger.info(f"Extracting metadata from file: {file_record.file_id}")
-        
-        result = {
+        self.logger.info(f"Extracting enhanced metadata from file: {file_record.file_id}")
+            
+        # ============================================
+        # STEP 1: Basic metadata (existing)
+        # ============================================
+        basic_metadata = {
             "file_id": str(file_record.file_id),
             "original_filename": file_record.original_filename,
             "metadata_filename": file_record.metadata_filename,
@@ -533,10 +646,247 @@ class MetadataCapability(AnalysisCapability):
             "uploaded_at": file_record.uploaded_at.isoformat(),
             "is_valid": file_record.is_valid,
             "validation_status": file_record.validation_status,
-            "fits_metadata": file_record.fits_metadata,
-            "data_info": file_record.data_info
+        }
+
+        # ============================================
+        # STEP 2: Extract FITS header
+        # ============================================
+        fits_metadata = file_record.fits_metadata or {}
+        data_info = file_record.data_info or {}
+        
+        # ============================================
+        # STEP 3: Extract critical fields
+        # ============================================
+        critical_fields = self._extract_critical_fields(fits_metadata, data_info)
+        
+        # ============================================
+        # STEP 4: Compute derived quantities
+        # ============================================
+        derived_quantities = self._compute_derived_quantities(
+            fits_metadata, 
+            data_info, 
+            rate_data
+        )
+        
+        # ============================================
+        # STEP 5: Get source context
+        # ============================================
+        source_context = self._get_source_context(fits_metadata)
+        
+        # ============================================
+        # STEP 6: Combine everything
+        # ============================================
+        result = {
+            **basic_metadata,
+            
+            # Enhanced fields for AstroSage
+            "critical_fields": critical_fields,
+            "derived_quantities": derived_quantities,
+            "source_context": source_context,
+            
+            # Keep original for reference (optional)
+            "fits_metadata": fits_metadata,
+            "data_info": data_info
         }
         
-        self.logger.info("Metadata extraction completed")
+        self.logger.info("Enhanced metadata extraction completed")
         
-        return (result, None)  # No plot for metadataa
+        return (result, None)
+    
+    def _extract_critical_fields(
+        self, 
+        fits_metadata: Dict, 
+        data_info: Dict
+    ) -> Dict[str, Any]:
+        """
+        Extract only the most important fields
+        
+        Returns:
+            Dictionary with critical observation parameters
+        """
+        critical = {}
+        
+        # Source identification
+        critical['source_name'] = fits_metadata.get('OBJECT')
+        critical['telescope'] = fits_metadata.get('TELESCOP')
+        critical['instrument'] = fits_metadata.get('INSTRUME')
+        critical['observation_id'] = fits_metadata.get('OBS_ID')
+        critical['observer'] = fits_metadata.get('OBSERVER')
+        
+        # Extract from HDU 1 (RATE table)
+        rate_hdu = self._find_rate_hdu(data_info)
+        
+        if rate_hdu:
+            header_dict = {
+                card['keyword']: card['value']
+                for card in rate_hdu.get('header_cards', [])
+            }
+            
+            # Timing parameters
+            critical['time_bin_size'] = float(header_dict.get('TIMEDEL', 0))
+            critical['t_start'] = float(header_dict.get('TSTART', 0))
+            critical['t_stop'] = float(header_dict.get('TSTOP', 0))
+            critical['exposure_time'] = float(header_dict.get('EXPOSURE', 0))
+            critical['good_time'] = float(header_dict.get('ONTIME', 0))
+            
+            # Energy parameters
+            critical['energy_min_ev'] = float(header_dict.get('CHANMIN', 0))
+            critical['filter_mode'] = header_dict.get('FILTER')
+            
+            # Data quality indicators
+            critical['background_subtracted'] = header_dict.get('BACKAPP') == 'True'
+            critical['dead_time_corrected'] = header_dict.get('DEADAPP') == 'True'
+            critical['vignetting_corrected'] = header_dict.get('VIGNAPP') == 'True'
+            critical['background_ratio'] = float(header_dict.get('BKGRATIO', 0))
+            
+            # Data structure
+            critical['n_time_bins'] = rate_hdu.get('n_rows', 0)
+            critical['has_error_column'] = 'ERROR' in rate_hdu.get('column_names', [])
+        
+        # GTI information
+        gti_hdu = self._find_gti_hdu(data_info)
+        if gti_hdu:
+            critical['n_gti_segments'] = gti_hdu.get('n_rows', 0)
+        
+        return critical
+    
+    def _compute_derived_quantities(
+        self,
+        fits_metadata: Dict,
+        data_info: Dict,
+        rate_data: np.ndarray
+    ) -> Dict[str, Any]:
+        """
+        Compute useful derived quantities
+        
+        Returns:
+            Dictionary with computed analysis-relevant values
+        """
+        derived = {}
+        
+        rate_hdu = self._find_rate_hdu(data_info)
+        
+        if not rate_hdu:
+            return derived
+        
+        header_dict = {
+            card['keyword']: card['value']
+            for card in rate_hdu.get('header_cards', [])
+        }
+        
+        # Extract basic parameters
+        timedel = float(header_dict.get('TIMEDEL', 1.0))
+        tstart = float(header_dict.get('TSTART', 0))
+        tstop = float(header_dict.get('TSTOP', 0))
+        exposure = float(header_dict.get('EXPOSURE', 0))
+        ontime = float(header_dict.get('ONTIME', 0))
+        
+        # ============================================
+        # Frequency constraints
+        # ============================================
+        if timedel > 0:
+            derived['nyquist_frequency_hz'] = 1.0 / (2 * timedel)
+        
+        duration = tstop - tstart
+        if duration > 0:
+            derived['observation_duration_seconds'] = duration
+            derived['observation_duration_hours'] = duration / 3600
+            derived['min_frequency_hz'] = 1.0 / duration
+            derived['duty_cycle_percent'] = (ontime / duration) * 100
+        
+        # Recommended frequency range (conservative)
+        if 'min_frequency_hz' in derived and 'nyquist_frequency_hz' in derived:
+            f_min = derived['min_frequency_hz']
+            f_nyq = derived['nyquist_frequency_hz']
+            
+            # Avoid 1/T effects at low freq, Nyquist artifacts at high freq
+            derived['recommended_f_low_hz'] = 5 * f_min
+            derived['recommended_f_high_hz'] = 0.1 * f_nyq
+        
+        # ============================================
+        # Energy band classification
+        # ============================================
+        chanmin = float(header_dict.get('CHANMIN', 0))
+        if chanmin > 0:
+            chanmin_kev = chanmin / 1000  # eV to keV
+            derived['energy_min_kev'] = chanmin_kev
+            
+            if chanmin_kev < 2:
+                derived['energy_band'] = 'soft X-ray (< 2 keV)'
+                derived['energy_band_short'] = 'soft X-ray'
+            elif chanmin_kev < 10:
+                derived['energy_band'] = 'hard X-ray (2-10 keV)'
+                derived['energy_band_short'] = 'hard X-ray'
+            else:
+                derived['energy_band'] = 'very hard X-ray (> 10 keV)'
+                derived['energy_band_short'] = 'very hard X-ray'
+        
+        # ============================================
+        # Data rate statistics
+        # ============================================
+        # if rate_data is not None and rate_data.size > 0:
+        #     derived['mean_count_rate'] = float(np.mean(rate_data))
+        #     derived['median_count_rate'] = float(np.median(rate_data))
+        #     derived['std_count_rate'] = float(np.std(rate_data))
+            
+        #     if derived['mean_count_rate'] > 0:
+        #         derived['count_rate_variability'] = float(
+        #             derived['std_count_rate'] / derived['mean_count_rate']
+        #         )
+                
+        #         # Estimate Poisson noise level (for rms-normalized PSD)
+        #         derived['expected_poisson_noise_rms'] = 2.0 / derived['mean_count_rate']
+        
+        # ============================================
+        # Exposure efficiency
+        # ============================================
+        if exposure > 0 and duration > 0:
+            derived['exposure_efficiency_percent'] = (exposure / duration) * 100
+        
+        return derived
+    
+    def _get_source_context(self, fits_metadata: Dict) -> Dict[str, Any]:
+        """
+        Get context about the source from known database
+        
+        Returns:
+            Dictionary with source context from literature
+        """
+        source_name = fits_metadata.get('OBJECT', '').strip()
+        
+        context = {
+            'is_known_source': source_name in self.KNOWN_SOURCES,
+            'source_name': source_name
+        }
+        
+        if source_name in self.KNOWN_SOURCES:
+            # Copy all known information
+            source_info = self.KNOWN_SOURCES[source_name].copy()
+            context.update(source_info)
+            
+            self.logger.info(f"Found known source: {source_name} ({source_info.get('type')})")
+        else:
+            self.logger.info(f"Unknown source: {source_name}")
+        
+        return context
+    
+    def _find_rate_hdu(self, data_info: Dict) -> Optional[Dict]:
+        """Find RATE table HDU (usually HDU 1)"""
+        for hdu in data_info.get('hdu_info', []):
+            if hdu.get('hdu_index') == 1:
+                return hdu
+            # Also check if RATE is in column names
+            if 'RATE' in hdu.get('column_names', []):
+                return hdu
+        return None
+    
+    def _find_gti_hdu(self, data_info: Dict) -> Optional[Dict]:
+        """Find GTI table HDU"""
+        for hdu in data_info.get('hdu_info', []):
+            cards = hdu.get('header_cards', [])
+            for card in cards:
+                if card.get('keyword') == 'EXTNAME':
+                    extname = str(card.get('value', ''))
+                    if 'GTI' in extname or 'SRC_GTIS' in extname:
+                        return hdu
+        return None

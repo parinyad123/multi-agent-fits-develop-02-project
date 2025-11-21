@@ -129,8 +129,7 @@ class UnifiedAnalysisAgent:
                 request.file_id,
                 session
             )
-            
-           
+                      
         except Exception as e:
             self.logger.error(f"Failed to load FITS file: {e}", exc_info=True)
             return self._create_error_result(
@@ -141,9 +140,39 @@ class UnifiedAnalysisAgent:
             )
         
         # ========================================
-        # STEP 2: Sequential execution of analyses
+        # STEP 2: ALWAYS extract metadata
+        # ========================================
+        try:
+            self.logger.info("Extracting metadata (always included for context)")
+            
+            metadata_capability = self.capabilities["metadata"]
+            
+            metadata_result, _ = await metadata_capability.execute(
+                rate_data=rate_data,
+                parameters={},
+                file_record=file_record
+            )
+            
+            results["metadata"] = metadata_result
+            completed.append("metadata")
+            
+            self.logger.info("Metadata extraction completed successfully")
+        
+        except Exception as e:
+            self.logger.warning(f"Metadata extraction failed: {e}", exc_info=True)
+            # Continue even if metadata fails (don't block other analyses)
+            results["metadata"] = {}
+            failed.append("metadata")
+        # ========================================
+        # STEP 3: Sequential execution of analyses
         # ========================================
         for analysis_type in request.analysis_types:
+
+            # Skip metadata if it was in the request (already done)
+            if analysis_type == "metadata":
+                self.logger.debug("Skipping metadata (already extracted)")
+                continue
+            
             self.logger.info(f"Processing analysis: {analysis_type}")
 
             try:
@@ -197,7 +226,7 @@ class UnifiedAnalysisAgent:
                 failed.append(analysis_type)
 
         # ========================================
-        # STEP 3: Save to database
+        # STEP 4: Save to database
         # ========================================
         try:
             analysis_id = await self._save_analysis_history(
@@ -228,7 +257,7 @@ class UnifiedAnalysisAgent:
             analysis_id = uuid4()
 
         # ========================================
-        # STEP 4: Return unified result
+        # STEP 5: Return unified result
         # ========================================
         execution_time = (datetime.now() - start_time).total_seconds()
         

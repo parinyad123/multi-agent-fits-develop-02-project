@@ -31,7 +31,7 @@ class ExpertiseAdapter:
     EXPERTISE_CONFIGS = {
         ExpertiseLevel.BEGINNER: {
             "temperature": 0.35,      # ชัดเจน, ตรงประเด็น
-            "max_tokens": 2000,
+            "max_tokens": 1500,
             "top_p": 0.90,           # จำกัด vocabulary
             "repeat_penalty": 1.1,    # หลีกเลี่ยงการซ้ำ
             "presence_penalty": 0.2,
@@ -56,7 +56,7 @@ class ExpertiseAdapter:
         },
         ExpertiseLevel.INTERMEDIATE: {
             "temperature": 0.5, 
-            "max_tokens": 2500,
+            "max_tokens": 2000,
             "top_p": 0.92,
             "repeat_penalty": 1.05,
             "presence_penalty": 0.15,
@@ -81,7 +81,7 @@ class ExpertiseAdapter:
         },
         ExpertiseLevel.ADVANCED: {
             "temperature": 0.65, 
-            "max_tokens": 3000,
+            "max_tokens": 2500,
             "top_p": 0.95,
             "repeat_penalty": 1.05,
             "presence_penalty": 0.1,
@@ -106,7 +106,7 @@ class ExpertiseAdapter:
         },
         ExpertiseLevel.EXPERT: {
             "temperature": 0.75,  
-            "max_tokens": 3500,
+            "max_tokens": 3000,
             "top_p": 0.95,
             "repeat_penalty": 1.0,  
             "presence_penalty": 0.05,

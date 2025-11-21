@@ -1,12 +1,14 @@
-"""
-multi-agent-fits-dev-02/app/services/astrosage/prompt_builder.py
+# app/services/astrosage/prompt_builder.py
 
-IMPROVED VERSION: Enhanced to force LLM to use actual numerical results
+"""
+Dynamic Prompt Builder with Routing Strategy Integration
+ใช้ RoutingStrategy จาก Orchestrator แทนการ detect context เอง
 """
 
 import logging
 from typing import List, Dict, Any, Optional
 
+from app.core.constants import RoutingStrategy
 from app.services.astrosage.models import (
     ExpertiseLevel,
     ConversationPair,
@@ -20,286 +22,157 @@ class PromptBuilder:
     """
     Construct optimized prompts for AstroSage LLM
     
-    KEY IMPROVEMENTS:
-    - Forces LLM to cite actual numerical values
-    - Requires model comparison when both are available
-    - Emphasizes physical interpretation of fitted parameters
+    KEY IMPROVEMENT: ใช้ RoutingStrategy จาก Orchestrator
+    - ASTROSAGE: Educational mode (no analysis context)
+    - ANALYSIS: Data analysis mode (มี analysis results)
+    - MIXED: Hybrid mode (both analysis and explanation)
     """
     
-    # Base system prompt (always included)
-    BASE_SYSTEM_PROMPT = """You are AstroSage, an expert astrophysicist AI assistant specializing in stellar physics, X-ray astronomy, time series analysis, power spectral density analysis, and accretion disk physics. You provide accurate, detailed, comprehensive scientific explanations while maintaining conversation continuity. Always reference previous discussion points when relevant.
+    # Base system prompt (ครอบคลุมทุกสาขา astronomy)
+    BASE_SYSTEM_PROMPT = """You are AstroSage, an expert AI assistant in astronomy and astrophysics with comprehensive knowledge across all subdisciplines:
 
-**YOUR ROLE**: You are the INTEGRATED ANALYSIS SYSTEM. You performed the calculations yourself. Speak in first person about YOUR analysis and YOUR results.
-- ✓ Say: "**I calculated**...", "**My analysis shows**...", "**The fit I performed gave**...", "**I found**..."
-- ✗ NOT: "From your analysis", "Your results show", "The data you provided", "Based on your analysis"
-- You are presenting YOUR OWN computational work to the user
+**YOUR EXPERTISE SPANS:**
+- Observational Astronomy: optical, radio, X-ray, gamma-ray, infrared, UV
+- Stellar Physics: evolution, structure, nucleosynthesis, stellar populations
+- Galactic Astronomy: Milky Way structure, star formation, interstellar medium
+- Extragalactic Astronomy: galaxies, AGN, quasars, large-scale structure
+- Cosmology: Big Bang, dark matter, dark energy, CMB, inflation
+- High-Energy Astrophysics: compact objects, accretion, jets, GRBs
+- Planetary Science: exoplanets, solar system, planetary formation
+- Time-Domain Astronomy: transients, variability, periodic phenomena
+- Instrumentation: telescopes, detectors, data reduction, spectroscopy
+- Data Analysis: statistics, time series, spectral analysis, imaging
+
+**YOUR ROLE - DETERMINED BY ROUTING STRATEGY:**
+
+The workflow orchestrator has classified this request and determined the routing strategy.
+Your response style adapts based on this classification:
+
+1. **ASTROSAGE Strategy** (Pure question-answering):
+   - User asking general astronomy questions
+   - No data analysis results available
+   - Response mode: Educational expert
+   - Tone: "Black holes are...", "This phenomenon occurs..."
+   - Draw from established astronomical knowledge
+
+2. **ANALYSIS Strategy** (Pure data analysis):
+   - User has uploaded FITS data for analysis
+   - Analysis results are available
+   - Response mode: Integrated analysis system
+   - Tone: "I calculated...", "My analysis shows...", "I found..."
+   - Present YOUR computational results with authority
+
+3. **MIXED Strategy** (Analysis + Explanation):
+   - User wants both analysis results AND broader context
+   - Combine YOUR specific results with general knowledge
+   - Response mode: Hybrid (analysis + education)
+   - Tone: "I found $b = 0.802$... This is typical because..."
+   - Connect YOUR results to established astronomy
 
 **CRITICAL RESPONSE REQUIREMENTS:**
 
-1. **Length**: Provide thorough, comprehensive explanations. 
-   - MINIMUM 800-1200 words for intermediate level
-   - NEVER give brief, summary-style answers
-   - Each section must be DETAILED with full explanations
+1. **LaTeX Equations - ABSOLUTELY MANDATORY**: 
+   - Display equations: $$equation$$
+   - Inline math: $parameter = value$
+   - ALL mathematical expressions must use LaTeX
+   - Example: $$\text{PSD}(f) = \frac{A}{f^b} + n$$
 
-2. **LaTeX Equations - ABSOLUTELY MANDATORY**: 
-   - **EVERY equation** must use LaTeX display format: $$equation$$
-   - **EVERY parameter value** must use inline math: $A = 2.67 \\times 10^3$
-   - **EVERY mathematical symbol**: $f$, $b$, $\\alpha$, $\\chi^2$
-   - Display equations: $$\\text{PSD}(f) = \\frac{A}{f^b} + n$$
-   - Inline parameters: "I found $A = 2.67 \\times 10^3$, $b = 0.802$, $n = 1.23 \\times 10^{-2}$"
-   - **CRITICAL**: Plain text like "A = 2.67×10³" is FORBIDDEN - must be $A = 2.67 \\times 10^3$
+2. **Structure with Headers:**
+   - Use ### for main sections
+   - Organize logically based on question type
 
-3. **Structure**: Organize responses with clear sections using ### headers
-   - Introduction (overview of YOUR analysis)
-   - Model 1 Results (detailed)
-   - Model 2 Results (detailed, if applicable)
-   - Physical Interpretation (200+ words)
-   - Model Comparison (if both models)
-   - Conclusions and Recommendations
+3. **Comprehensive Coverage:**
+   - For ASTROSAGE: explain concepts thoroughly
+   - For ANALYSIS: interpret YOUR specific results
+   - For MIXED: combine both approaches
 
-4. **Physical Interpretation**: Always explain the physical meaning behind mathematical results
-   - What does each parameter tell us about the system?
-   - How do these values compare to typical sources?
-   - What physical processes are indicated?
+4. **Physical Interpretation:**
+   - Always explain WHY things happen
+   - Connect mathematics to physical reality
+   - Relate to observational evidence
 
-5. **MANDATORY: CITE ACTUAL NUMERICAL VALUES**: 
-   - You MUST start by explicitly stating the fitted parameter values from YOUR analysis
-   - Example: "**I calculated** the power law fit, obtaining $A = 2.67 \\times 10^3$, $b = 0.802$, $n = 1.23 \\times 10^{-2}$"
-   - Example: "**My bending power law analysis yielded** $A = 3.45 \\times 10^3$, $f_b = 4.06 \\times 10^{-5}$ Hz, $\\alpha = 1.23$, $n = 1.18 \\times 10^{-2}$"
-   - DO NOT give generic explanations without referring to specific numbers from YOUR calculations
+**RESPONSE LENGTH GUIDELINES:**
+- Beginner: 500-800 words (detailed but accessible)
+- Intermediate: 800-1200 words (thorough technical depth)
+- Advanced: 1200-1800 words (research-level analysis)
+- Expert: 1800-2500 words (comprehensive scholarly discussion)
 
-6. **MANDATORY: MODEL COMPARISON**:
-   - When YOU have performed BOTH power law AND bending power law fits, you MUST:
-     * Present both sets of YOUR fitted parameters (with LaTeX)
-     * Compare YOUR models directly (which of YOUR fits is better?)
-     * Explain what the break frequency tells us (from YOUR bending power law fit)
-     * Provide quantitative comparison (e.g., reduced chi-squared from YOUR fits)
-     * Write 300+ words comparing the models
-
-7. **Completeness**: Cover theory, mathematics, interpretation, and practical implications
-   - Derive or explain equations when relevant
-   - Connect to accretion disk physics
-   - Reference typical values from literature
-   - Suggest follow-up analyses
-
-**FORBIDDEN**: 
-- Never say "your analysis", "your results", "your data", "from your fit" - these are YOUR results
-- Never give purely theoretical explanations without connecting to YOUR actual fitted values
-- Never act as an external observer; you ARE the analysis system
-- Never skip LaTeX formatting - ALL math must use LaTeX
-- Never write short responses - detailed analysis is REQUIRED"""
-  
-    @classmethod
-    def build_system_prompt(cls, expertise_level: ExpertiseLevel) -> str:
-        """
-        Build system prompt based on expertise level
-        
-        Args:
-            expertise_level: User's expertise level
-        
-        Returns:
-            Complete system prompt with LaTeX instructions
-        """
-        # Start with base prompt
-        prompt = cls.BASE_SYSTEM_PROMPT
-        
-        # Add expertise-specific modifier
-        modifier = ExpertiseAdapter.get_system_prompt_modifier(expertise_level)
-        prompt += "\n\n" + modifier
-        
-        # Add LaTeX examples section
-        prompt += "\n\n" + cls._get_latex_examples()
-        
-        return prompt
-    
-    @classmethod
-    def _get_latex_examples(cls) -> str:
-        """
-        Provide LaTeX formatting examples
-        
-        Returns:
-            Examples of proper LaTeX usage
-        """
-        return """
-**LaTeX FORMATTING EXAMPLES:**
-
-Display Equations (use $$...$$):
-- Power Law: $$\\text{PSD}(f) = \\frac{A}{f^b} + n$$
-- Bending Power Law: $$\\text{PSD}(f) = \\frac{A}{f\\left[1 + \\left(\\frac{f}{f_b}\\right)^{\\alpha-1}\\right]} + n$$
-- Chi-squared: $$\\chi^2 = \\sum_{i=1}^N \\frac{(O_i - E_i)^2}{\\sigma_i^2}$$
-- Integrals: $$F_\\text{total} = \\int_{f_\\text{min}}^{f_\\text{max}} \\text{PSD}(f) \\, df$$
-
-Inline Math (use $...$):
-- Parameters: $A = 2.67 \\times 10^3$, $b = 0.802$, $f_b = 4.06 \\times 10^{-5}$ Hz
-- Ranges: frequency range $f \\in [10^{-5}, 10^{-2}]$ Hz
-- Comparisons: if $b > 1$, then $b < 2$ implies...
-
-Subscripts and Superscripts:
-- $f_b$ (break frequency), $\\sigma_\\text{rms}$ (RMS variability)
-- $\\chi^2_\\nu$ (reduced chi-squared), $M_\\odot$ (solar mass)
-
-Greek Letters:
-- $\\alpha$, $\\beta$, $\\gamma$, $\\sigma$, $\\chi$, $\\nu$, $\\omega$
-
-**IMPORTANT:** Always explain what each variable means immediately after introducing it!
-"""
+**FORBIDDEN:**
+- Never fake analysis results if none provided
+- Never use first-person for general knowledge in ASTROSAGE mode
+- Never skip LaTeX formatting
+- Never give superficial answers"""
 
     @classmethod
-    def build_conversation_context(
+    def build_full_prompt(
         cls, 
-        conversations: Optional[List[ConversationPair]]
-    ) -> str:
+        request: AstroSageRequest,
+        routing_strategy: RoutingStrategy  # NEW: จาก Orchestrator
+    ) -> List[Dict[str, str]]:
         """
-        Build conversation context section
-        
-        Args:
-            conversations: List of past conversation pairs
-        
-        Returns:
-            Formatted conversation context
-        """
-        if not conversations:
-            return ""
-        
-        lines = ["\n\n=== PREVIOUS CONVERSATION HISTORY ===\n"]
-        lines.append("(Last 10 exchanges - maintain continuity with this discussion)\n")
-        
-        for i, pair in enumerate(conversations, 1):
-            # Format time
-            time_str = cls._format_timestamp(pair.timestamp)
-            
-            # User message
-            lines.append(f"\n**Exchange {i}** ({time_str}):")
-            lines.append(f"USER: {pair.user_message}")
-            
-            # Assistant message (truncate if very long)
-            assistant_msg = pair.assistant_message
-            if len(assistant_msg) > 300:
-                assistant_msg = assistant_msg[:300] + "... [response continues]"
-            lines.append(f"ASTROSAGE: {assistant_msg}\n")
-        
-        lines.append("\n**INSTRUCTION:** Reference these past exchanges when relevant to provide continuity.")
-        
-        return "\n".join(lines)
-    
-    @classmethod
-    def build_analysis_context(
-        cls,
-        analysis_results: Optional[Dict[str, Any]],
-        expertise_level: ExpertiseLevel = ExpertiseLevel.INTERMEDIATE
-    ) -> str:
-        """
-        Build analysis results context section with STRONG emphasis on using values
-        
-        Args:
-            analysis_results: Results from FITS analysis
-            expertise_level: User's expertise level for appropriate detail
-        
-        Returns:
-            Formatted analysis context
-        """
-        if not analysis_results:
-            return ""
-        
-        lines = ["\n\n=== YOUR ANALYSIS RESULTS (THAT YOU COMPUTED) ===\n"]
-        lines.append("**REMINDER:** These are YOUR OWN analysis results. YOU performed these calculations.")
-        lines.append("**MANDATORY:** Present these as YOUR findings, using first person (I calculated, My analysis shows, I found)")
-        lines.append("**YOU MUST CITE THESE EXACT NUMBERS AS YOUR OWN RESULTS!**\n")
-        
-        # File information
-        if 'metadata' in analysis_results:
-            lines.append(cls._format_metadata(analysis_results['metadata']))
-        
-        # Statistics
-        if 'statistics' in analysis_results:
-            lines.append(cls._format_statistics(
-                analysis_results['statistics'], 
-                expertise_level
-            ))
-        
-        # PSD
-        if 'psd' in analysis_results:
-            lines.append(cls._format_psd(
-                analysis_results['psd'],
-                expertise_level
-            ))
-        
-        # Check if BOTH models are present
-        has_power_law = 'power_law' in analysis_results
-        has_bending = 'bending_power_law' in analysis_results
-        
-        # Power Law
-        if has_power_law:
-            lines.append(cls._format_power_law(
-                analysis_results['power_law'],
-                expertise_level
-            ))
-        
-        # Bending Power Law
-        if has_bending:
-            lines.append(cls._format_bending_power_law(
-                analysis_results['bending_power_law'],
-                expertise_level
-            ))
-        
-        # Add comparison instruction if both models exist
-        if has_power_law and has_bending:
-            lines.append("\n" + "="*70)
-            lines.append("**CRITICAL INSTRUCTION: MODEL COMPARISON REQUIRED!**")
-            lines.append("="*70)
-            lines.append("""
-Since YOU performed BOTH power law and bending power law fits, you MUST:
-
-1. **State both sets of YOUR fitted parameters explicitly** (using first person: "I calculated...", "My fit gave...")
-2. **Compare YOUR models directly:**
-   - Which of YOUR fits provides better results? (Compare YOUR chi-squared values if available)
-   - What does the break frequency $f_b$ from YOUR bending power law tell us about the system?
-   - How do the power law indices from YOUR two fits differ?
-3. **Physical interpretation of YOUR results:**
-   - What does YOUR bending power law's break frequency imply about characteristic timescales?
-   - Does YOUR simple power law adequately capture the variability, or is YOUR bending model necessary?
-4. **YOUR Recommendations:**
-   - Based on YOUR analysis, which model should be used for further study?
-   - What follow-up observations or analyses do YOU recommend?
-""")
-        
-        lines.append("\n**REMINDER:** Present these as YOUR calculations and explain what YOUR numerical results mean physically!")
-        
-        return "\n".join(lines)
-
-    @classmethod
-    def build_full_prompt(cls, request: AstroSageRequest) -> List[Dict[str, str]]:
-        """
-        Build complete prompt for LLM API
+        Build complete prompt for LLM API with routing strategy
         
         Args:
             request: AstroSageRequest object
+            routing_strategy: Strategy from Orchestrator's Classification Agent
         
         Returns:
             List of message dictionaries for API
         """
-        # Build system prompt
-        system_prompt = cls.build_system_prompt(request.expertise_level)
+        logger.info(f"Building prompt with routing strategy: {routing_strategy.value}")
         
-        # Add conversation context
+        # ============================================
+        # STEP 1: Build base system prompt
+        # ============================================
+        system_prompt = cls.BASE_SYSTEM_PROMPT
+        
+        # ============================================
+        # STEP 2: Build expertise-specific section
+        # ============================================
+        system_prompt += "\n\n" + cls.build_system_prompt(request.expertise_level)
+        
+        # ============================================
+        # STEP 3: Add routing-specific framing
+        # ============================================
+        framing_instruction = cls._get_framing_by_strategy(routing_strategy)
+        system_prompt += "\n\n" + framing_instruction
+        
+        # ============================================
+        # STEP 4: Add conversation context if available
+        # ============================================
         if request.conversation_history:
             conversation_context = cls.build_conversation_context(
                 request.conversation_history
             )
             system_prompt += conversation_context
         
-        # Add analysis context
+        # ============================================
+        # STEP 5: Add analysis context based on strategy
+        # ============================================
         if request.analysis_results:
-            analysis_context = cls.build_analysis_context(
-                request.analysis_results,
-                request.expertise_level
-            )
-            system_prompt += analysis_context
+            # Only add detailed analysis context for ANALYSIS or MIXED
+            if routing_strategy in [RoutingStrategy.ANALYSIS, RoutingStrategy.MIXED]:
+                analysis_context = cls.build_analysis_context(
+                    request.analysis_results,
+                    request.expertise_level,
+                    routing_strategy
+                )
+                system_prompt += analysis_context
+            else:
+                # ASTROSAGE strategy: minimal analysis mention
+                system_prompt += "\n\n**NOTE:** Analysis results exist but are not the focus of this query."
         
-        # Add final instruction
-        system_prompt += cls._build_final_instruction(request.expertise_level)
+        # ============================================
+        # STEP 6: Add final instruction checklist
+        # ============================================
+        system_prompt += cls._build_final_instruction(
+            request.expertise_level,
+            routing_strategy
+        )
         
-        # Build messages list
+        # ============================================
+        # STEP 7: Build messages list
+        # ============================================
         messages = [
             {
                 "role": "system",
@@ -313,462 +186,953 @@ Since YOU performed BOTH power law and bending power law fits, you MUST:
         
         logger.info(
             f"Built prompt: system={len(system_prompt)} chars, "
-            f"expertise={request.expertise_level.value}"
+            f"expertise={request.expertise_level.value}, "
+            f"strategy={routing_strategy.value}"
         )
         
         return messages
     
     @classmethod
-    def _build_final_instruction(cls, expertise_level: ExpertiseLevel) -> str:
+    def _get_framing_by_strategy(cls, strategy: RoutingStrategy) -> str:
         """
-        Build final instruction based on expertise level
+        Get response framing instruction based on routing strategy
+        
+        Args:
+            strategy: Routing strategy from Orchestrator
+        
+        Returns:
+            Framing instruction text
+        """
+        framings = {
+            RoutingStrategy.ASTROSAGE: """
+**CURRENT ROUTING: ASTROSAGE (Educational Mode)**
+
+The Classification Agent determined this is a general astronomy question.
+No data analysis is required.
+
+**RESPONSE FRAMING:**
+- ✅ Use educational, explanatory tone
+- ✅ Speak naturally: "Black holes are...", "This occurs when..."
+- ✅ Draw from established astronomical knowledge
+- ✅ Provide comprehensive explanations with examples
+- ✅ Use analogies appropriate to expertise level
+- ✅ Reference observations, missions, and discoveries
+
+**FORBIDDEN:**
+- ❌ DO NOT use first-person for general facts: "I calculated that gravity..."
+- ❌ DO NOT claim to have analyzed data that doesn't exist
+- ❌ DO NOT present general knowledge as YOUR findings
+
+**EXAMPLE GOOD RESPONSE:**
+"Power spectral density (PSD) analysis is a technique used to study variability 
+in astronomical time series. The PSD follows a power law: $$\text{PSD}(f) = Af^{-b}$$ 
+where $b$ is the power law index. For accreting systems, typical values range from 
+$b = 1$ to $b = 2$ because..."
+""",
+            
+            RoutingStrategy.ANALYSIS: """
+**CURRENT ROUTING: ANALYSIS (Data Analysis Mode)**
+
+The Classification Agent determined this requires analyzing the user's FITS data.
+Analysis results are available.
+
+**RESPONSE FRAMING:**
+- ✅ You ARE the integrated analysis system
+- ✅ Use first-person: "I calculated...", "My analysis shows...", "I found..."
+- ✅ Present YOUR fitted parameter values explicitly
+- ✅ Cite YOUR specific numerical results with LaTeX
+- ✅ Explain the physical meaning of YOUR results
+- ✅ Compare YOUR values with literature when relevant
+
+**FORBIDDEN:**
+- ❌ DO NOT say "your analysis" or "your results" - these are YOUR results
+- ❌ DO NOT give generic explanations without YOUR specific numbers
+- ❌ DO NOT act as external observer; you ARE the analysis system
+
+**EXAMPLE GOOD RESPONSE:**
+"I calculated the power law fit for your light curve, obtaining $A = 2.67 \\times 10^3$, 
+$b = 0.802$, and $n = 1.23 \\times 10^{-2}$. My analysis shows that the power law 
+index of $b = 0.802$ indicates red noise variability. This value is slightly lower 
+than typical neutron star LMXBs ($b \\approx 1.2-1.5$), suggesting..."
+""",
+            
+            RoutingStrategy.MIXED: """
+**CURRENT ROUTING: MIXED (Hybrid Mode)**
+
+The Classification Agent determined this requires BOTH data analysis AND 
+broader astronomical context.
+
+**RESPONSE FRAMING:**
+- ✅ Start with YOUR specific analysis results (first-person)
+- ✅ Then explain general astronomical context (educational)
+- ✅ Connect YOUR results to broader knowledge
+- ✅ Compare YOUR values with typical/literature values
+- ✅ Balance technical detail with accessibility
+
+**STRUCTURE APPROACH:**
+1. Present YOUR analysis results: "I found..."
+2. Explain general context: "This type of variability occurs when..."
+3. Compare YOUR results: "Compared to similar sources..."
+4. Physical interpretation: "The reason YOUR value is significant..."
+5. Recommendations based on YOUR findings
+
+**EXAMPLE GOOD RESPONSE:**
+"I calculated a power law index of $b = 0.802$ from your light curve (ANALYSIS). 
+This falls in the red noise regime, where $b < 1$ (EXPLANATION). 
+
+Power law indices in this range are characteristic of shot noise processes in 
+accreting systems, where individual accretion events produce the observed variability 
+(GENERAL CONTEXT).
+
+Your value is slightly lower than typical Z sources ($b \\approx 1.2$) but consistent 
+with atoll sources in the island state (COMPARISON). This suggests your source may 
+be in a lower accretion rate state... (INTERPRETATION)"
+"""
+        }
+        
+        return framings.get(strategy, framings[RoutingStrategy.ASTROSAGE])
+    
+    @classmethod
+    def build_system_prompt(cls, expertise_level: ExpertiseLevel) -> str:
+        """
+        Build system prompt based on expertise level
+        (ใช้ version ใหม่จาก ExpertiseAdapter ที่ครอบคลุมทุกสาขา)
+        """
+        modifier = ExpertiseAdapter.get_system_prompt_modifier(expertise_level)
+        latex_examples = cls._get_latex_examples()
+        
+        return modifier + "\n\n" + latex_examples
+    
+    @classmethod
+    def build_analysis_context(
+        cls,
+        analysis_results: Optional[Dict[str, Any]],
+        expertise_level: ExpertiseLevel,
+        routing_strategy: RoutingStrategy
+    ) -> str:
+        """
+        Build analysis results context with strategy-appropriate framing
+        
+        Input structure from Orchestrator (via Analysis Agent):
+        {
+            "metadata": {...},
+            "statistics": {...},
+            "psd": {...},
+            "power_law": {...},
+            "bending_power_law": {...}
+        }
+
+        Now includes metadata-enriched formatting for better interpretation
+        
+        Args:
+            analysis_results: Results from Analysis Agent
+            expertise_level: User's expertise level
+            routing_strategy: Routing strategy (ANALYSIS, MIXED, ASTROSAGE)
+        
+        Returns:
+            Formatted analysis context string
+        """
+        if not analysis_results:
+            return ""
+        
+        # ============================================
+        # Extract metadata (if available)
+        # ============================================
+        metadata = analysis_results.get('metadata', {})
+        
+        # Check if metadata has enhanced fields
+        has_enhanced_metadata = (
+            'critical_fields' in metadata or 
+            'derived_quantities' in metadata or 
+            'source_context' in metadata
+        )
+        
+        lines = ["\n\n" + "="*70]
+        lines.append("=== ANALYSIS RESULTS ===")
+        lines.append("="*70 + "\n")
+        
+        # ============================================
+        # Adjust header based on routing strategy
+        # ============================================
+        if routing_strategy == RoutingStrategy.ANALYSIS:
+            lines.append("**YOUR ANALYSIS RESULTS** (that YOU computed):")
+            lines.append("**MANDATORY:** Present these as YOUR findings using first person")
+            lines.append("**YOU MUST CITE THESE EXACT NUMBERS AS YOUR OWN RESULTS!**\n")
+        
+        elif routing_strategy == RoutingStrategy.MIXED:
+            lines.append("**YOUR ANALYSIS RESULTS + CONTEXT:**")
+            lines.append("Present YOUR results first, then connect to general astronomy")
+            lines.append("**START with YOUR specific fitted values!**\n")
+        
+        else:  # ASTROSAGE (shouldn't usually have detailed results)
+            lines.append("**ANALYSIS RESULTS CONTEXT:**")
+            lines.append("These are available for reference if relevant to the question\n")
+        
+        # ============================================
+        # Format each analysis type if present
+        # ============================================
+        
+        # Metadata
+        # if 'metadata' in analysis_results:
+        #     lines.append(cls._format_metadata(analysis_results['metadata']))
+
+        # ============================================
+        # Show compact metadata summary FIRST
+        # ============================================
+        if has_enhanced_metadata:
+            lines.append(cls._format_metadata_compact(metadata))
+            lines.append("\n" + "="*70 + "\n")
+        
+        # ============================================
+        # Format each analysis type WITH metadata
+        # ============================================
+        
+        # Statistics (no metadata needed)
+        if 'statistics' in analysis_results:
+            lines.append(cls._format_statistics(
+                analysis_results['statistics'], 
+                expertise_level
+            ))
+        
+        # PSD (with timing metadata)
+        if 'psd' in analysis_results:
+            lines.append(cls._format_psd(
+                analysis_results['psd'],
+                metadata,
+                expertise_level
+            ))
+        
+        # Check if both models exist
+        has_power_law = 'power_law' in analysis_results
+        has_bending = 'bending_power_law' in analysis_results
+        
+        # Power Law (with source context)
+        if has_power_law:
+            lines.append(cls._format_power_law(
+                analysis_results['power_law'],
+                metadata,
+                expertise_level,
+                routing_strategy
+            ))
+        
+        # Bending Power Law (with full context)
+        if has_bending:
+            lines.append(cls._format_bending_power_law(
+                analysis_results['bending_power_law'],
+                metadata,
+                expertise_level,
+                routing_strategy
+            ))
+        
+        # ============================================
+        # Model comparison instruction (if both models)
+        # ============================================
+        if has_power_law and has_bending:
+            lines.append("\n" + "="*70)
+            
+            if routing_strategy == RoutingStrategy.ANALYSIS:
+                lines.append("**CRITICAL: MODEL COMPARISON REQUIRED!**")
+                lines.append("="*70)
+                lines.append("""
+Since YOU performed BOTH power law and bending power law fits, you MUST:
+
+1. **State both sets of YOUR fitted parameters explicitly**
+   - Use first person: "I calculated...", "My fit gave..."
+   - Present YOUR power law: $A$, $b$, $n$
+   - Present YOUR bending power law: $A$, $f_b$, $\\alpha$, $n$
+
+2. **Compare YOUR models directly:**
+   - Which of YOUR fits provides better results?
+   - What does YOUR break frequency $f_b$ tell us?
+   - How do the parameters from YOUR two fits differ?
+
+3. **Physical interpretation of YOUR results:**
+   - What does YOUR $f_b$ imply about characteristic timescales?
+   - Does YOUR simple power law adequately capture the variability?
+   - Is YOUR bending model necessary?
+
+4. **YOUR Recommendations:**
+   - Based on YOUR analysis, which model to use?
+   - What follow-up analyses do YOU recommend?
+""")
+            
+            elif routing_strategy == RoutingStrategy.MIXED:
+                lines.append("**NOTE: TWO MODELS AVAILABLE FOR COMPARISON**")
+                lines.append("="*70)
+                lines.append("""
+You have both power law and bending power law results:
+- Compare the models if relevant to answering the question
+- Explain what the break frequency tells us about the system
+- Connect YOUR fitted values to the general concepts being discussed
+""")
+        
+        # ============================================
+        # Final reminder based on strategy
+        # ============================================
+        if routing_strategy == RoutingStrategy.ANALYSIS:
+            lines.append("\n**CRITICAL REMINDER:** Present as YOUR calculations, cite YOUR numbers!")
+        elif routing_strategy == RoutingStrategy.MIXED:
+            lines.append("\n**REMINDER:** Start with YOUR results, then add context!")
+        
+        return "\n".join(lines)
+    
+    @classmethod
+    def _build_final_instruction(
+        cls, 
+        expertise_level: ExpertiseLevel,
+        routing_strategy: RoutingStrategy
+    ) -> str:
+        """
+        Build final instruction checklist based on expertise and routing
         
         Args:
             expertise_level: User's expertise level
+            routing_strategy: Routing strategy from Orchestrator
         
         Returns:
-            Final instruction text
+            Final instruction text with appropriate checklist
         """
-        base_instruction = """
-\n\n**FINAL MANDATORY CHECKLIST BEFORE RESPONDING:**
+        # Base checklist (always included)
+        base_checklist = """
+\n\n**FINAL MANDATORY CHECKLIST:**
 
-☑ Have I cited the ACTUAL fitted parameter values from MY analysis?
-☑ Have I compared MY models (if I performed both power law and bending power law fits)?
-☑ Have I explained the PHYSICAL meaning of each parameter in detail?
 ☑ Have I used proper LaTeX formatting for ALL equations and parameters?
-☑ Is my response sufficiently detailed (meeting MINIMUM word count)?
-☑ Have I provided specific recommendations based on MY results?
-
-**If you cannot check ALL boxes above, your response is INCOMPLETE!**
-
-**CRITICAL LENGTH & FORMATTING REQUIREMENTS:**
-
-1. **MINIMUM LENGTH**: Your response MUST meet the word count requirement for the expertise level.
-   - DO NOT write short, summary-style responses
-   - Each section should be DETAILED and COMPREHENSIVE
-   - Include full explanations, not just bullet points
-
-2. **MANDATORY LaTeX USAGE**: 
-   - ALL equations MUST use display format: $$equation$$
-   - ALL parameters MUST use inline math: $A = 2.67 \\times 10^3$
-   - ALL mathematical expressions: $f_b$, $\\chi^2_\\nu$, $\\alpha$
-   - Use proper formatting: $$\\text{PSD}(f) = \\frac{A}{f^b} + n$$
-   - NOT acceptable: "A = 2.67×10³" (must be: $A = 2.67 \\times 10^3$)
-
-3. **REQUIRED RESPONSE STRUCTURE**:
-   - Start with overview of YOUR analysis
-   - Detailed section for each model YOU fitted
-   - Physical interpretation section (200+ words)
-   - Model comparison section (if both models)
-   - Conclusions and recommendations
-   - Each section with proper headers (###)
-
-**FORBIDDEN SHORT RESPONSES**: 
-- Never write paragraph-only responses without sections
-- Never skip LaTeX formatting
-- Never give brief answers when detailed analysis is required
+☑ Is my response sufficiently detailed for the expertise level?
+☑ Have I provided accurate, comprehensive information?
+☑ Have I structured my response with clear sections?
 """
         
-        instructions = {
-            ExpertiseLevel.BEGINNER: base_instruction + """
-**RESPONSE GUIDELINES FOR BEGINNER LEVEL:**
-
-**MINIMUM LENGTH: 500-800 WORDS** (This is MANDATORY, not a suggestion)
-
-**REQUIRED STRUCTURE** (Use these section headers):
-
-### 1. Simple Overview
-- Explain what YOU did in everyday language (50-100 words)
-- Avoid jargon, use simple terms
-
-### 2. My Results
-- Present YOUR fitted parameters using LaTeX
-- Example: "I found $A = 2.67 \\times 10^3$"
-- Explain each parameter in simple terms (100-150 words)
-- Use analogies where helpful
-
-### 3. What Does This Mean?
-- Explain the physical meaning in accessible language (150-200 words)
-- Use everyday analogies (e.g., "like water flowing down a drain")
-- Connect to real-world observations
-
-### 4. Comparing Models (if YOU fitted multiple models)
-- Simply explain which of YOUR models works better (100-150 words)
-- Use non-technical language
-- Show why one is better than the other
-
-### 5. What Should You Do Next?
-- Practical next steps (50-100 words)
-- Suggestions for learning more
-- Recommendations for further observations
-
-**LaTeX REQUIREMENTS**:
-- Use LaTeX for ALL numbers and equations
-- Keep equations simple: $$\\text{PSD} = \\frac{A}{f^b} + n$$
-- Always explain what each symbol means right after introducing it
-            """,
-            ExpertiseLevel.INTERMEDIATE: base_instruction + """
-**RESPONSE GUIDELINES FOR INTERMEDIATE LEVEL:**
-
-**MINIMUM LENGTH: 800-1200 WORDS** (This is MANDATORY, not a suggestion)
-
-**REQUIRED STRUCTURE** (Use these section headers):
-
-### 1. Overview of My Analysis
-- Briefly introduce what YOU calculated (50-100 words)
-
-### 2. Power Law Model Results (if applicable)
-- Present YOUR fitted equation with LaTeX: $$\\text{PSD}(f) = \\frac{A}{f^b} + n$$
-- State YOUR parameters: $A = ...$, $b = ...$, $n = ...$
-- Explain what each parameter means (100-150 words)
-
-### 3. Bending Power Law Model Results (if applicable)
-- Present YOUR fitted equation with LaTeX: $$\\text{PSD}(f) = \\frac{A}{f[1+(f/f_b)^{\\alpha-1}]} + n$$
-- State YOUR parameters: $A = ...$, $f_b = ...$ Hz, $\\alpha = ...$, $n = ...$
-- Calculate and show characteristic timescale: $t_b = 1/f_b \\approx ...$ s
-- Explain what each parameter means (150-200 words)
-
-### 4. Physical Interpretation
-- Relate YOUR power law index to accretion disk physics (150-200 words)
-- Explain what YOUR break frequency tells us about the system
-- Compare YOUR values with typical values from literature
-- Discuss what physical processes are indicated
-
-### 5. Model Comparison (if YOU fitted both models)
-- Compare YOUR chi-squared values: $\\chi^2_\\nu$ for each model
-- Explain which of YOUR fits is better and why (200-250 words)
-- Discuss implications of the better fit
-
-### 6. Conclusions and Recommendations
-- Summarize YOUR key findings
-- Recommend which model to use for further analysis
-- Suggest follow-up observations or analyses
-
-**LaTeX REQUIREMENTS**:
-- Every equation in display format: $$...$$
-- Every parameter value in inline math: $A = 2.67 \\times 10^3$
-- Proper notation: $\\chi^2_\\nu$, $f_b$, $\\alpha$, not "chi-squared", "fb", "alpha"
-            """,
-            ExpertiseLevel.ADVANCED: base_instruction + """
-**RESPONSE GUIDELINES FOR ADVANCED LEVEL:**
-
-**MINIMUM LENGTH: 1200-1800 WORDS** (This is MANDATORY, not a suggestion)
-
-**REQUIRED STRUCTURE** (Use these section headers):
-
-### 1. Overview of My Analysis
-- Technical introduction to YOUR approach (100-150 words)
-- Mention data processing and quality checks YOU performed
-
-### 2. Detailed Model Fitting Results
-- Present YOUR fitted equations with full LaTeX notation
-- Power law: $$\\text{PSD}(f) = \\frac{A}{f^b} + n$$
-- Bending: $$\\text{PSD}(f) = \\frac{A}{f\\left[1 + \\left(\\frac{f}{f_b}\\right)^{\\alpha-1}\\right]} + n$$
-- State ALL YOUR parameters with uncertainties if available (200-250 words)
-- Discuss parameter correlations and degeneracies
-
-### 3. Physical Interpretation and Theoretical Context
-- Detailed discussion of YOUR results in context of accretion physics (300-400 words)
-- Connect to specific theoretical models (e.g., Shakura-Sunyaev disk)
-- Compare YOUR values with published results from similar sources
-- Cite specific papers and missions
-- Discuss systematic uncertainties
-
-### 4. Model Comparison and Statistical Analysis
-- Thorough comparison of YOUR fits (250-300 words)
-- Present YOUR $\\chi^2_\\nu$, Akaike Information Criterion (AIC), or Bayesian Information Criterion (BIC)
-- Discuss which model is statistically preferred
-- Evaluate alternative models (e.g., Lorentzian components, broken power law)
-- Parameter space analysis
-
-### 5. Observational Implications
-- What do YOUR results tell us about the system? (200-250 words)
-- Spectral state implications
-- Comparison with other wavelength observations
-- Constraints on system parameters (mass, spin, inclination)
-
-### 6. Conclusions and Advanced Recommendations
-- Summarize YOUR key findings
-- Suggest advanced follow-up analyses
-- Recommend specific observing strategies
-- Discuss open questions raised by YOUR analysis
-
-**LaTeX & Technical REQUIREMENTS**:
-- Full mathematical rigor with proper notation
-- Include error propagation where relevant: $\\sigma_b = ...$
-- Proper statistical notation: $\\chi^2_\\nu$, $p$-values, confidence intervals
-- Reference equations by number if multiple derivations
-            """,
-            ExpertiseLevel.EXPERT: base_instruction + """
-**RESPONSE GUIDELINES FOR EXPERT LEVEL:**
-
-**MINIMUM LENGTH: 1800-2500 WORDS** (This is MANDATORY, not a suggestion)
-
-**REQUIRED STRUCTURE** (Use these section headers):
-
-### 1. Comprehensive Analysis Overview
-- Detailed description of YOUR complete analysis pipeline (150-200 words)
-- Data reduction methodology YOU used
-- Quality control procedures YOU applied
-- Justification for YOUR modeling choices
-
-### 2. Detailed Fitting Methodology and Results
-- Full mathematical formulation of YOUR models (300-400 words)
-- Power law: $$\\text{PSD}(f) = \\frac{A}{f^b} + n$$
-- Bending power law with full derivation
-- Alternative parameterizations YOU considered
-- Complete parameter table with YOUR fitted values and uncertainties
-- Covariance matrices if relevant
-- Posterior distributions for Bayesian approaches
-
-### 3. Comprehensive Physical Interpretation
-- In-depth theoretical context for YOUR results (400-500 words)
-- Connection to specific accretion flow models
-- Viscous timescales: $t_\\text{visc} \\sim r^2/\\nu$
-- Orbital timescales: $t_\\text{orb} \\sim (r^3/GM)^{1/2}$
-- Detailed comparison with YOUR break frequency
-- Multi-wavelength context
-- Comparison with theoretical predictions
-
-### 4. Statistical Model Comparison and Validation
-- Rigorous statistical comparison of YOUR models (350-450 words)
-- Multiple goodness-of-fit metrics YOU calculated
-- Model selection criteria (AIC, BIC, Bayes factors)
-- Cross-validation results
-- Residual analysis and systematic checks YOU performed
-- Discussion of model adequacy and limitations
-- Alternative models and why YOU rejected them
-
-### 5. Degeneracies, Systematics, and Selection Effects
-- Thorough discussion of YOUR error budget (250-300 words)
-- Parameter degeneracies in YOUR fits
-- Systematic uncertainties: background subtraction, dead time, pile-up
-- Selection effects: frequency range, binning, red noise leak
-- How these affect YOUR conclusions
-
-### 6. Broader Context and Future Directions
-- YOUR results in context of recent literature (200-250 words)
-- Comparison with state-of-the-art missions (NICER, Insight-HXMT, etc.)
-- Implications for open questions in the field
-- Specific research directions enabled by YOUR findings
-
-### 7. Detailed Conclusions and Methodological Recommendations
-- Comprehensive summary of YOUR findings
-- Specific recommendations for similar analyses
-- Optimal observing strategies based on YOUR experience
-- Suggestions for theoretical work to interpret YOUR results
-
-**LaTeX & Research-Level REQUIREMENTS**:
-- Peer-review quality mathematical exposition
-- Complete derivations where illuminating
-- Proper statistical framework: likelihood, priors, posteriors
-- Error propagation: $\\sigma_f = \\sqrt{\\sum_i (\\partial f/\\partial x_i)^2 \\sigma_{x_i}^2}$
-- Advanced notation: tensors, covariance matrices if needed
-- Reference all relevant literature (Author et al. YEAR style)
-            """
+        # Strategy-specific checklist
+        strategy_checklist = {
+            RoutingStrategy.ASTROSAGE: """
+**ASTROSAGE MODE CHECKLIST:**
+☑ Have I used educational/explanatory tone (not first-person)?
+☑ Have I explained concepts clearly and thoroughly?
+☑ Have I provided appropriate examples or analogies?
+☑ Have I referenced relevant observations/missions?
+☑ Have I avoided claiming to analyze non-existent data?
+""",
+            
+            RoutingStrategy.ANALYSIS: """
+**ANALYSIS MODE CHECKLIST:**
+☑ Have I cited MY actual fitted parameter values?
+☑ Have I used first-person consistently (I calculated, My fit...)?
+☑ Have I compared MY models if both are available?
+☑ Have I explained the physical meaning of MY results?
+☑ Have I provided specific recommendations based on MY analysis?
+☑ Have I compared MY values with literature when relevant?
+""",
+            
+            RoutingStrategy.MIXED: """
+**MIXED MODE CHECKLIST:**
+☑ Have I started with MY specific analysis results?
+☑ Have I then connected to general astronomical context?
+☑ Have I compared MY values with typical/literature values?
+☑ Have I balanced technical analysis with broader explanation?
+☑ Have I used appropriate framing (first-person for MY results, educational for concepts)?
+☑ Have I explained why MY results are significant?
+"""
         }
         
-        return instructions.get(expertise_level, instructions[ExpertiseLevel.INTERMEDIATE])
+        # Combine base + strategy-specific
+        final_instruction = base_checklist + strategy_checklist.get(
+            routing_strategy,
+            strategy_checklist[RoutingStrategy.ASTROSAGE]
+        )
+        
+        # Add expertise-specific notes
+        if expertise_level == ExpertiseLevel.BEGINNER:
+            final_instruction += """
+**BEGINNER LEVEL REMINDER:**
+- Use simple language and everyday analogies
+- Explain ALL technical terms
+- Break complex ideas into small steps
+"""
+        elif expertise_level == ExpertiseLevel.EXPERT:
+            final_instruction += """
+**EXPERT LEVEL REMINDER:**
+- Include research-level details and citations
+- Discuss systematic uncertainties
+- Reference recent literature (last 2-3 years)
+- Suggest advanced follow-up analyses
+"""
+        
+        return final_instruction
+    
+    # ============================================
+    # Helper methods (unchanged)
+    # ============================================
+    
+    @classmethod
+    def _get_latex_examples(cls) -> str:
+        """LaTeX formatting examples (unchanged from previous version)"""
+        return """
+**LaTeX FORMATTING EXAMPLES:**
 
+Display Equations (use $$...$$):
+- Power Law: $$\\text{PSD}(f) = \\frac{A}{f^b} + n$$
+- Bending Power Law: $$\\text{PSD}(f) = \\frac{A}{f\\left[1 + \\left(\\frac{f}{f_b}\\right)^{\\alpha-1}\\right]} + n$$
+- Chi-squared: $$\\chi^2 = \\sum_{i=1}^N \\frac{(O_i - E_i)^2}{\\sigma_i^2}$$
 
-    # ==========================================
-    # Helper Methods for Formatting
-    # ==========================================
+Inline Math (use $...$):
+- Parameters: $A = 2.67 \\times 10^3$, $b = 0.802$, $f_b = 4.06 \\times 10^{-5}$ Hz
+- Ranges: $f \\in [10^{-5}, 10^{-2}]$ Hz
+- Comparisons: if $b > 1$, then...
+
+**IMPORTANT:** Always explain what each variable means!
+"""
+    
+    @classmethod
+    def build_conversation_context(
+        cls, 
+        conversations: Optional[List[ConversationPair]]
+    ) -> str:
+        """Build conversation context (unchanged)"""
+        if not conversations:
+            return ""
+        
+        lines = ["\n\n=== PREVIOUS CONVERSATION HISTORY ===\n"]
+        lines.append("(Last 10 exchanges - maintain continuity)\n")
+        
+        for i, pair in enumerate(conversations, 1):
+            time_str = cls._format_timestamp(pair.timestamp)
+            lines.append(f"\n**Exchange {i}** ({time_str}):")
+            lines.append(f"USER: {pair.user_message}")
+            
+            assistant_msg = pair.assistant_message
+            if len(assistant_msg) > 300:
+                assistant_msg = assistant_msg[:300] + "..."
+            lines.append(f"ASTROSAGE: {assistant_msg}\n")
+        
+        return "\n".join(lines)
     
     @staticmethod
-    def _format_metadata(metadata: Dict[str, Any]) -> str:
-        """Format file metadata"""
-        lines = ["**File Information:**"]
+    def _format_metadata_compact(metadata: Dict[str, Any]) -> str:
+        """
+        Format compact metadata summary for context
         
-        if 'original_filename' in metadata:
-            lines.append(f"- Filename: `{metadata['original_filename']}`")
-        if 'file_size' in metadata:
-            size_mb = metadata['file_size'] / (1024 * 1024)
-            lines.append(f"- File Size: {size_mb:.2f} MB")
-        if 'uploaded_at' in metadata:
-            lines.append(f"- Uploaded: {metadata['uploaded_at']}")
-        if 'n_data_points' in metadata:
-            lines.append(f"- Total Data Points: {metadata['n_data_points']:,}")
+        Shows essential observation information without overwhelming detail
+        """
+        lines = ["**OBSERVATION SUMMARY:**\n"]
+        
+        # ============================================
+        # Source & Instrument
+        # ============================================
+        if 'critical_fields' in metadata:
+            crit = metadata['critical_fields']
+            
+            source = crit.get('source_name', 'Unknown')
+            telescope = crit.get('telescope', '?')
+            instrument = crit.get('instrument', '?')
+            obs_id = crit.get('observation_id', '?')
+            
+            lines.append(f"- **Source**: {source}")
+            lines.append(f"- **Instrument**: {telescope}/{instrument} (ObsID: {obs_id})")
+        
+        # ============================================
+        # Timing & Energy
+        # ============================================
+        if 'derived_quantities' in metadata:
+            deriv = metadata['derived_quantities']
+            
+            duration = deriv.get('observation_duration_hours', 0)
+            energy_band = deriv.get('energy_band_short', 'N/A')
+            duty_cycle = deriv.get('duty_cycle_percent', 0)
+            
+            lines.append(f"- **Duration**: {duration:.1f} hours (duty cycle: {duty_cycle:.1f}%)")
+            lines.append(f"- **Energy Band**: {energy_band}")
+            
+            # Frequency constraints
+            if 'nyquist_frequency_hz' in deriv:
+                f_nyq = deriv['nyquist_frequency_hz']
+                f_min = deriv.get('min_frequency_hz', 0)
+                lines.append(f"- **Frequency Range**: ${f_min:.2e}$ - ${f_nyq:.3f}$ Hz (accessible)")
+        
+        # ============================================
+        # Source Type (if known)
+        # ============================================
+        if 'source_context' in metadata:
+            ctx = metadata['source_context']
+            
+            if ctx.get('is_known_source'):
+                lines.append(f"\n**Source Type**: {ctx.get('type', 'Unknown')}")
+                
+                # Key characteristics (first 2)
+                if 'characteristics' in ctx:
+                    chars = ctx['characteristics'][:2]
+                    lines.append(f"- Known for: {', '.join(chars)}")
         
         return "\n".join(lines) + "\n"
+    
+    # ============================================
+    # Updated format methods with metadata
+    # ============================================
     
     @staticmethod
     def _format_statistics(
         stats: Dict[str, Any],
         expertise_level: ExpertiseLevel
     ) -> str:
-        """Format statistics results with appropriate detail"""
-        lines = ["**Statistical Summary:**"]
+        """
+        Format statistics results with appropriate detail
         
-        if 'statistics' in stats:
-            stats = stats['statistics']
+        Input structure from Analysis Agent:
+        {
+            "statistics": {"mean": 123.45, "std": 15.6, ...},
+            "n_data_points": 10000,
+            "parameters_used": {...}
+        }
+        """
+        lines = ["**Statistical Summary:**\n"]
         
-        # Basic stats (all levels)
-        if 'count' in stats:
-            lines.append(f"- Data Points: $N = {stats['count']:,}$")
-        if 'mean' in stats:
-            lines.append(f"- Mean Rate: $\\langle R \\rangle = {stats['mean']:.6e}$ counts/s")
-        if 'median' in stats:
-            lines.append(f"- Median Rate: $R_\\text{{median}} = {stats['median']:.6e}$ counts/s")
-        if 'std' in stats:
-            lines.append(f"- Standard Deviation: $\\sigma = {stats['std']:.6e}$ counts/s")
+        # Extract nested statistics dict
+        statistics = stats.get('statistics', {})
+        n_points = stats.get('n_data_points', 0)
         
-        # Additional stats for advanced users
-        if expertise_level in [ExpertiseLevel.ADVANCED, ExpertiseLevel.EXPERT]:
-            if 'min' in stats and 'max' in stats:
-                lines.append(f"- Range: $[{stats['min']:.6e}, {stats['max']:.6e}]$ counts/s")
-            if 'mean' in stats and 'std' in stats:
-                cv = stats['std'] / stats['mean']
-                lines.append(f"- Coefficient of Variation: $CV = \\sigma/\\mu = {cv:.3f}$")
+        if n_points > 0:
+            lines.append(f"- Data Points: $N = {n_points:,}$")
+        
+        # Basic statistics (always show if available)
+        if 'mean' in statistics:
+            lines.append(f"- Mean Rate: $\\langle R \\rangle = {statistics['mean']:.6e}$ counts/s")
+        
+        if 'median' in statistics:
+            lines.append(f"- Median Rate: $R_\\text{{median}} = {statistics['median']:.6e}$ counts/s")
+        
+        if 'std' in statistics:
+            lines.append(f"- Standard Deviation: $\\sigma = {statistics['std']:.6e}$ counts/s")
+        
+        if 'min' in statistics:
+            lines.append(f"- Minimum: $R_\\text{{min}} = {statistics['min']:.6e}$ counts/s")
+        
+        if 'max' in statistics:
+            lines.append(f"- Maximum: $R_\\text{{max}} = {statistics['max']:.6e}$ counts/s")
+        
+        # Additional statistics for advanced users
+        # if expertise_level in [ExpertiseLevel.ADVANCED, ExpertiseLevel.EXPERT]:
+            
+        # Percentiles
+        percentile_keys = [k for k in statistics.keys() if k.startswith('percentile_')]
+        if percentile_keys:
+            lines.append("\n**Percentiles:**")
+            for key in sorted(percentile_keys):
+                p = key.replace('percentile_', '')
+                lines.append(f"- ${p}^\\text{{th}}$ percentile: ${statistics[key]:.6e}$")
+        
+        # Quantiles
+        quantile_keys = [k for k in statistics.keys() if k.startswith('quantile_')]
+        if quantile_keys:
+            lines.append("\n**Quantiles:**")
+            for key in sorted(quantile_keys):
+                q = key.replace('quantile_', '').replace('_', '.')
+                lines.append(f"- $q = {q}$: ${statistics[key]:.6e}$")
+        
+        # Distribution summary
+        if 'distribution_summary' in statistics:
+            dist_sum = statistics['distribution_summary']
+            lines.append("\n**Distribution Summary:**")
+            
+            if 'range' in dist_sum:
+                r = dist_sum['range']
+                lines.append(f"- Range: $[{r['min']:.6e}, {r['max']:.6e}]$, span = ${r['span']:.6e}$")
+            
+            if 'iqr' in dist_sum:
+                iqr = dist_sum['iqr']
+                lines.append(f"- IQR: $Q_3 - Q_1 = {iqr['iqr']:.6e}$")
+                lines.append(f"- Outlier fences: $[{iqr['lower_fence']:.6e}, {iqr['upper_fence']:.6e}]$")
+            
+            if 'coefficient_of_variation' in dist_sum:
+                cv = dist_sum['coefficient_of_variation']
+                lines.append(f"- Coefficient of Variation: $CV = {cv:.3f}$")
+            
+            if 'skewness' in dist_sum:
+                skew = dist_sum['skewness']
+                lines.append(f"- Skewness: ${skew:.3f}$")
+            
+            if 'kurtosis' in dist_sum:
+                kurt = dist_sum['kurtosis']
+                lines.append(f"- Kurtosis: ${kurt:.3f}$")
         
         return "\n".join(lines) + "\n"
     
     @staticmethod
     def _format_psd(
         psd: Dict[str, Any],
+        metadata: Dict[str, Any],
         expertise_level: ExpertiseLevel
     ) -> str:
-        """Format PSD results with appropriate detail"""
-        lines = ["**Power Spectral Density Analysis:**"]
+        """
+        Format PSD results with appropriate detail
         
+        Input structure from Analysis Agent:
+        {
+            "n_points": 3500,
+            "freq_range": [1e-5, 0.05],
+            "psd_range": [1.2e-5, 3.4e-3],
+            "frequencies_sample": [...],
+            "psd_values_sample": [...],
+            "parameters_used": {...}
+        }
+        """
+        lines = ["**Power Spectral Density Analysis:**\n"]
+        
+        # ============================================
+        # Frequency range with context
+        # ============================================
         if 'freq_range' in psd:
-            if isinstance(psd['freq_range'], dict) and 'actual' in psd['freq_range']:
-                freq_range = psd['freq_range']['actual']
-            else:
-                freq_range = psd['freq_range']
-            
+            freq_range = psd['freq_range']
             f_min, f_max = freq_range[0], freq_range[1]
-            lines.append(
-                f"- Frequency Range: $f \\in [{f_min:.2e}, {f_max:.2e}]$ Hz"
-            )
+            lines.append(f"- Frequency Range: $f \\in [{f_min:.2e}, {f_max:.2e}]$ Hz")
             
-            # Add period range for context (advanced users)
-            if expertise_level in [ExpertiseLevel.ADVANCED, ExpertiseLevel.EXPERT]:
-                if f_min > 0:
-                    p_max = 1.0 / f_min
-                    p_min = 1.0 / f_max
-                    lines.append(
-                        f"- Corresponding Period Range: $P \\in [{p_min:.2e}, {p_max:.2e}]$ s"
-                    )
+            # Add period range
+            if f_min > 0 and f_max > 0:
+                p_max = 1.0 / f_min
+                p_min = 1.0 / f_max
+                lines.append(f"- Period Range: $P \\in [{p_min:.2e}, {p_max:.2e}]$ s")
+                
+                # Convert to human-readable units
+                if p_max > 3600:
+                    lines.append(f"  → Longest timescale: ~{p_max/3600:.1f} hours")
+                if p_min < 60:
+                    lines.append(f"  → Shortest timescale: ~{p_min:.1f} seconds")
+            
+            # Add context from metadata
+            if 'derived_quantities' in metadata:
+                deriv = metadata['derived_quantities']
+                
+                if 'observation_duration_hours' in deriv:
+                    duration = deriv['observation_duration_hours']
+                    lines.append(f"\n*Context: Your {duration:.1f}-hour observation allows probing these timescales*")
         
+        # Number of points
         if 'n_points' in psd:
-            lines.append(f"- Number of Frequency Bins: $N_\\text{{bins}} = {psd['n_points']:,}$")
+            lines.append(f"\n- Number of Frequency Bins: $N_\\text{{bins}} = {psd['n_points']:,}$")
         
-        if 'n_bins' in psd and isinstance(psd['n_bins'], dict):
-            lines.append(
-                f"- Requested/Actual Bins: {psd['n_bins'].get('requested', 'N/A')} / "
-                f"{psd['n_bins'].get('actual', 'N/A')}"
-            )
+        # PSD range
+        if 'psd_range' in psd:
+            psd_range = psd['psd_range']
+            lines.append(f"- PSD Range: $[{psd_range[0]:.2e}, {psd_range[1]:.2e}]$ (rms²/Hz)")
+        
+        
+        # Parameters used (for advanced users)
+        if expertise_level in [ExpertiseLevel.ADVANCED, ExpertiseLevel.EXPERT]:
+            if 'parameters_used' in psd:
+                params = psd['parameters_used']
+                lines.append("\n**PSD Parameters:**")
+                if 'low_freq' in params:
+                    lines.append(f"- Lower frequency cutoff: ${params['low_freq']:.2e}$ Hz")
+                if 'high_freq' in params:
+                    lines.append(f"- Upper frequency cutoff: ${params['high_freq']:.2e}$ Hz")
+                if 'bins' in params:
+                    lines.append(f"- Requested bins: {params['bins']}")
         
         return "\n".join(lines) + "\n"
     
     @staticmethod
     def _format_power_law(
         power_law: Dict[str, Any],
-        expertise_level: ExpertiseLevel
+        metadata: Dict[str, Any],
+        expertise_level: ExpertiseLevel,
+        routing_strategy: RoutingStrategy
     ) -> str:
-        """Format power law fit results with STRONG emphasis on using these values"""
+        """
+        Format power law fit results with strategy-appropriate framing
+        
+        Input structure from Analysis Agent:
+        {
+            "model": "power_law",
+            "fitted_parameters": {"A": 2.67e3, "b": 0.802, "n": 1.23e-2},
+            "initial_parameters": {"A": 1.0, "b": 1.0},
+            "parameter_bounds": {"A": [0.0, 1e38], "b": [0.1, 3.0]},
+            "parameters_used": {...}
+        }
+        """
         lines = ["\n" + "="*70]
-        lines.append("**YOUR POWER LAW FIT RESULTS** (CITE AS YOUR OWN CALCULATIONS!):")
-        lines.append("="*70)
-        lines.append("Model YOU fitted: $$\\text{PSD}(f) = \\frac{A}{f^b} + n$$\n")
         
-        if 'parameters' in power_law:
-            params = power_law['parameters']
-        elif 'fitted_parameters' in power_law:
-            params = power_law['fitted_parameters']
+        # Adjust header based on routing strategy
+        if routing_strategy == RoutingStrategy.ANALYSIS:
+            lines.append("**YOUR POWER LAW FIT RESULTS:**")
+            lines.append("(Present these as YOUR calculations)")
+        elif routing_strategy == RoutingStrategy.MIXED:
+            lines.append("**YOUR POWER LAW FIT:**")
+            lines.append("(Start with these, then add context)")
         else:
-            params = power_law
+            lines.append("**POWER LAW FIT RESULTS:**")
+            lines.append("(Reference if relevant)")
         
-        if 'A' in params:
-            lines.append(f"- **Amplitude**: $A = {params['A']:.6e}$")
-        if 'b' in params:
-            lines.append(f"- **Power Law Index**: $b = {params['b']:.3f}$")
-        if 'n' in params:
-            lines.append(f"- **Noise Level**: $n = {params['n']:.6e}$")
+        lines.append("="*70)
+        lines.append("Model: $$\\text{PSD}(f) = \\frac{A}{f^b} + n$$\n")
+
+        # ============================================
+        # Fitted parameters
+        # ============================================
+        fitted = power_law.get('fitted_parameters', {})
         
-        # Add interpretation hints for advanced users
+        if 'A' in fitted:
+            lines.append(f"- **Amplitude**: $A = {fitted['A']:.6e}$")
+        
+        if 'b' in fitted:
+            b_val = fitted['b']
+            lines.append(f"- **Power Law Index**: $b = {b_val:.3f}$")
+            
+            # Add interpretation hint
+            if b_val < 1:
+                lines.append("  → *Suggests red noise / flicker noise regime*")
+            elif b_val < 2:
+                lines.append("  → *Typical for accreting source variability*")
+            else:
+                lines.append("  → *Steep spectrum / white noise dominated*")
+        
+        if 'n' in fitted:
+            lines.append(f"- **Noise Level**: $n = {fitted['n']:.6e}$")
+        
+        # ============================================
+        # CONTEXT from metadata
+        # ============================================
+        if metadata and 'source_context' in metadata:
+            ctx = metadata['source_context']
+            
+            if ctx.get('is_known_source') and 'typical_psd' in ctx:
+                typical = ctx['typical_psd']
+                b_range = typical.get('power_law_index_range', [])
+                
+                if b_range and 'b' in fitted:
+                    b_val = fitted['b']
+                    lines.append(f"\n**Literature Comparison:**")
+                    lines.append(f"- Typical for {ctx.get('source_name')}: $b \\approx {b_range[0]}-{b_range[1]}$")
+                    lines.append(f"- Your value: $b = {b_val:.3f}$")
+                    
+                    # Interpretation
+                    if b_val < b_range[0]:
+                        lines.append(f"  → *Your value is LOWER than typical (flatter spectrum)*")
+                    elif b_val > b_range[1]:
+                        lines.append(f"  → *Your value is HIGHER than typical (steeper spectrum)*")
+                    else:
+                        lines.append(f"  → *Your value is within typical range*")
+                
+                if 'notes' in typical:
+                    lines.append(f"\n*Note: {typical['notes']}*")
+        
+        # Add energy band context
+        if metadata and 'derived_quantities' in metadata:
+            deriv = metadata['derived_quantities']
+            if 'energy_band' in deriv:
+                lines.append(f"\n*This fit is from {deriv['energy_band']} data*")
+        
+        # Expert level: show initial parameters and bounds
         if expertise_level in [ExpertiseLevel.ADVANCED, ExpertiseLevel.EXPERT]:
-            if 'b' in params:
-                b_val = params['b']
-                lines.append(f"\n*Hint: $b = {b_val:.3f}$ suggests ", )
-                if b_val < 1:
-                    lines.append("red noise / flicker noise regime*")
-                elif b_val < 2:
-                    lines.append("typical accreting source variability*")
-                else:
-                    lines.append("steep spectrum / white noise dominated*")
+            if 'initial_parameters' in power_law:
+                init = power_law['initial_parameters']
+                lines.append("\n**Initial Guess:**")
+                for param, value in init.items():
+                    lines.append(f"- ${param}_0 = {value:.3e}$")
+            
+            if 'parameter_bounds' in power_law:
+                bounds = power_law['parameter_bounds']
+                lines.append("\n**Parameter Bounds:**")
+                for param, bound in bounds.items():
+                    lower = bound[0]
+                    upper = bound[1] if isinstance(bound[1], (int, float)) else bound[1]
+                    if upper == "unbounded":
+                        lines.append(f"- ${param} \\in [{lower:.3e}, \\infty)$")
+                    else:
+                        lines.append(f"- ${param} \\in [{lower:.3e}, {upper:.3e}]$")
         
-        # Add fit quality if available
-        if 'fit_quality' in power_law:
-            quality = power_law['fit_quality']
-            if 'chi_squared' in quality:
-                lines.append(f"- **Goodness of Fit**: $\\chi^2_\\nu = {quality['chi_squared']:.3f}$")
-        
-        lines.append("\n**INSTRUCTION:** Present these as YOUR fitted values and interpret what YOUR results mean!")
+        # Context-specific instruction
+        if routing_strategy == RoutingStrategy.ANALYSIS:
+            lines.append("\n**Instruction:** Present these as YOUR fitted values")
+        elif routing_strategy == RoutingStrategy.MIXED:
+            lines.append("\n**Instruction:** Reference these values if relevant to the question")
+        else:
+            lines.append("\n**Instruction:** Use only if directly relevant to answering the question")
         
         return "\n".join(lines) + "\n"
     
     @staticmethod
     def _format_bending_power_law(
         bending: Dict[str, Any],
-        expertise_level: ExpertiseLevel
+        metadata: Dict[str, Any],
+        expertise_level: ExpertiseLevel,
+        routing_strategy: RoutingStrategy
     ) -> str:
-        """Format bending power law fit results with STRONG emphasis"""
+        """
+        Format bending power law fit results with strategy-appropriate framing
+        
+        Input structure from Analysis Agent:
+        {
+            "model": "bending_power_law",
+            "fitted_parameters": {"A": 3.45e3, "fb": 4.06e-5, "sh": 1.23, "n": 1.18e-2},
+            "initial_parameters": {"A": 10.0, "fb": 0.01, "sh": 1.0},
+            "parameter_bounds": {...},
+            "parameters_used": {...}
+        }
+        """
         lines = ["\n" + "="*70]
-        lines.append("**YOUR BENDING POWER LAW FIT RESULTS** (CITE AS YOUR OWN CALCULATIONS!):")
+        
+        # Adjust header based on routing strategy
+        if routing_strategy == RoutingStrategy.ANALYSIS:
+            lines.append("**YOUR BENDING POWER LAW FIT RESULTS:**")
+            lines.append("(Present these as YOUR calculations)")
+        elif routing_strategy == RoutingStrategy.MIXED:
+            lines.append("**YOUR BENDING POWER LAW FIT:**")
+            lines.append("(Start with these, then add context)")
+        else:
+            lines.append("**BENDING POWER LAW FIT RESULTS:**")
+            lines.append("(Reference if relevant)")
+        
         lines.append("="*70)
         lines.append(
-            "Model YOU fitted: $$\\text{PSD}(f) = \\frac{A}{f\\left[1 + \\left(\\frac{f}{f_b}\\right)^{\\alpha-1}\\right]} + n$$\n"
+            "Model: $$\\text{PSD}(f) = \\frac{A}{f\\left[1 + \\left(\\frac{f}{f_b}\\right)^{\\alpha-1}\\right]} + n$$\n"
         )
         
-        if 'parameters' in bending:
-            params = bending['parameters']
-        elif 'fitted_parameters' in bending:
-            params = bending['fitted_parameters']
-        else:
-            params = bending
+        # ============================================
+        # Fitted parameters
+        # ============================================
+        fitted = bending.get('fitted_parameters', {})
         
-        if 'A' in params:
-            lines.append(f"- **Amplitude**: $A = {params['A']:.6e}$")
-        if 'fb' in params:
-            lines.append(f"- **Break Frequency**: $f_b = {params['fb']:.6e}$ Hz")
-            # Add timescale for context
-            if params['fb'] > 0:
-                t_break = 1.0 / params['fb']
+        if 'A' in fitted:
+            lines.append(f"- **Amplitude**: $A = {fitted['A']:.6e}$")
+        
+        if 'fb' in fitted:
+            fb = fitted['fb']
+            lines.append(f"- **Break Frequency**: $f_b = {fb:.6e}$ Hz")
+            
+            # Calculate timescale
+            if fb > 0:
+                t_break = 1.0 / fb
                 lines.append(f"  → **Characteristic Timescale**: $t_b \\approx {t_break:.2e}$ s")
-        if 'sh' in params:
-            lines.append(f"- **Shape Parameter**: $\\alpha = {params['sh']:.3f}$")
-        if 'n' in params:
-            lines.append(f"- **Noise Level**: $n = {params['n']:.6e}$")
+                
+                # Convert to human-readable
+                if t_break < 60:
+                    lines.append(f"  → (~{t_break:.1f} seconds)")
+                elif t_break < 3600:
+                    lines.append(f"  → (~{t_break/60:.1f} minutes)")
+                else:
+                    lines.append(f"  → (~{t_break/3600:.1f} hours)")
+                
+                # Physical interpretation
+                if t_break < 1:
+                    lines.append("  → *Very short timescale: inner disk / orbital periods*")
+                elif t_break < 100:
+                    lines.append("  → *Short timescale: viscous/thermal processes*")
+                elif t_break < 10000:
+                    lines.append("  → *Intermediate: disk instabilities*")
+                else:
+                    lines.append("  → *Long timescale: outer disk / binary effects*")
         
-        # Add physical interpretation for advanced users
+        if 'sh' in fitted:
+            lines.append(f"- **Shape Parameter**: $\\alpha = {fitted['sh']:.3f}$")
+        
+        if 'n' in fitted:
+            lines.append(f"- **Noise Level**: $n = {fitted['n']:.6e}$")
+        
+        # ============================================
+        # CONTEXT from metadata
+        # ============================================
+        if metadata and 'source_context' in metadata:
+            ctx = metadata['source_context']
+            
+            if ctx.get('is_known_source') and 'typical_psd' in ctx:
+                typical = ctx['typical_psd']
+                fb_range = typical.get('break_frequency_range', [])
+                
+                if fb_range and 'fb' in fitted:
+                    fb_val = fitted['fb']
+                    lines.append(f"\n**Literature Comparison:**")
+                    lines.append(f"- Typical for {ctx.get('source_name')}: $f_b \\approx {fb_range[0]:.0e}-{fb_range[1]:.0e}$ Hz")
+                    lines.append(f"- Your value: $f_b = {fb_val:.2e}$ Hz")
+                    
+                    # Interpretation
+                    if fb_val < fb_range[0]:
+                        lines.append(f"  → *Your break is at LOWER frequency (longer timescales)*")
+                    elif fb_val > fb_range[1]:
+                        lines.append(f"  → *Your break is at HIGHER frequency (shorter timescales)*")
+                    else:
+                        lines.append(f"  → *Your break is within typical range*")
+                
+                if 'notes' in typical:
+                    lines.append(f"\n*Note: {typical['notes']}*")
+            
+            # Add black hole mass context
+            if 'black_hole_mass_solar' in ctx and 'fb' in fitted:
+                bh_mass = ctx['black_hole_mass_solar']
+                fb_val = fitted['fb']
+                t_break = 1.0 / fb_val if fb_val > 0 else 0
+                
+                # Gravitational radius: Rg = GM/c^2
+                # For M_sun: Rg ~ 1.5 km ~ 5e-6 light-seconds
+                rg_seconds = 5e-6 * bh_mass  # Rg in light-seconds
+                
+                lines.append(f"\n**Physical Scales** (for $M_{{BH}} \\approx {bh_mass:.1e} M_\\odot$):")
+                lines.append(f"- Gravitational radius: $R_g \\approx {rg_seconds:.2e}$ light-s")
+                lines.append(f"- Break timescale: $t_b \\approx {t_break:.2e}$ s")
+                
+                if t_break > 0:
+                    scale_ratio = t_break / rg_seconds
+                    lines.append(f"- Scale: $t_b / (R_g/c) \\approx {scale_ratio:.1e}$")
+        
+        # Add observation duration comparison
+        if metadata and 'derived_quantities' in metadata:
+            deriv = metadata['derived_quantities']
+            
+            if 'observation_duration_seconds' in deriv and 'fb' in fitted:
+                obs_duration = deriv['observation_duration_seconds']
+                fb_val = fitted['fb']
+                t_break = 1.0 / fb_val if fb_val > 0 else 0
+                
+                if t_break > 0:
+                    n_cycles = obs_duration / t_break
+                    lines.append(f"\n*Your observation covers ~{n_cycles:.1f} characteristic cycles*")
+        
+        # Expert level: show initial parameters and bounds
         if expertise_level in [ExpertiseLevel.ADVANCED, ExpertiseLevel.EXPERT]:
-            if 'fb' in params and params['fb'] > 0:
-                lines.append(
-                    f"\n*Hint: $f_b = {params['fb']:.2e}$ Hz may correspond to "
-                    f"characteristic frequencies from inner disk radius, "
-                    f"viscous timescales, or orbital periods*"
-                )
+            if 'initial_parameters' in bending:
+                init = bending['initial_parameters']
+                lines.append("\n**Initial Guess:**")
+                for param, value in init.items():
+                    if param == 'sh':
+                        lines.append(f"- $\\alpha_0 = {value:.3f}$")
+                    elif param == 'fb':
+                        lines.append(f"- $f_{{b,0}} = {value:.3e}$")
+                    else:
+                        lines.append(f"- ${param}_0 = {value:.3e}$")
+            
+            if 'parameter_bounds' in bending:
+                bounds = bending['parameter_bounds']
+                lines.append("\n**Parameter Bounds:**")
+                for param, bound in bounds.items():
+                    lower = bound[0]
+                    upper = bound[1] if isinstance(bound[1], (int, float)) else bound[1]
+                    
+                    # Use proper notation
+                    if param == 'sh':
+                        param_name = "\\alpha"
+                    elif param == 'fb':
+                        param_name = "f_b"
+                    else:
+                        param_name = param
+                    
+                    if upper == "unbounded":
+                        lines.append(f"- ${param_name} \\in [{lower:.3e}, \\infty)$")
+                    else:
+                        lines.append(f"- ${param_name} \\in [{lower:.3e}, {upper:.3e}]$")
         
-        # Add fit quality if available
-        if 'fit_quality' in bending:
-            quality = bending['fit_quality']
-            if 'chi_squared' in quality:
-                lines.append(f"- **Goodness of Fit**: $\\chi^2_\\nu = {quality['chi_squared']:.3f}$")
-        
-        lines.append("\n**INSTRUCTION:** Present YOUR break frequency result and explain what it tells us!")
+        # Context-specific instruction
+        if routing_strategy == RoutingStrategy.ANALYSIS:
+            lines.append("\n**Instruction:** Present YOUR break frequency result and explain what it tells us!")
+        elif routing_strategy == RoutingStrategy.MIXED:
+            lines.append("\n**Instruction:** Reference YOUR fitted values when relevant")
+        else:
+            lines.append("\n**Instruction:** Use only if directly relevant")
         
         return "\n".join(lines) + "\n"
     
     @staticmethod
     def _format_timestamp(timestamp) -> str:
-        """Format timestamp for display"""
+        """Format timestamp for display (unchanged)"""
         from datetime import datetime, timezone
         
         now = datetime.now()
-        
-        # Handle timezone-aware timestamps
         if timestamp.tzinfo is not None:
             now = now.replace(tzinfo=timezone.utc)
         
@@ -778,11 +1142,9 @@ Since YOU performed BOTH power law and bending power law fits, you MUST:
         if seconds < 60:
             return "just now"
         elif seconds < 3600:
-            minutes = int(seconds / 60)
-            return f"{minutes}m ago"
+            return f"{int(seconds/60)}m ago"
         elif seconds < 86400:
-            hours = int(seconds / 3600)
-            return f"{hours}h ago"
+            return f"{int(seconds/3600)}h ago"
         else:
-            days = int(seconds / 86400)
-            return f"{days}d ago"
+            return f"{int(seconds/86400)}d ago"
+        

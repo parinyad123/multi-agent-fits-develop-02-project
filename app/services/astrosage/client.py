@@ -13,6 +13,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.prompt_logger import prompt_logger
 from app.core.constants import RoutingStrategy
 from app.services.astrosage.models import (
     AstroSageRequest,
@@ -67,6 +68,8 @@ class AstroSageClient:
         """
 
         start_time = time.time()
+
+        log_id = None # Track log ID
         
         logger.info(
             f"Processing AstroSage query: session={request.session_id}, "
@@ -98,6 +101,21 @@ class AstroSageClient:
             # STEP 3: Build prompt
             # ========================================
             messages = PromptBuilder.build_full_prompt(request, routing_strategy)
+
+            # Log prompt BEFORE calling LLM
+            log_id = prompt_logger.log_astrosage_prompt(
+                session_id=request.session_id,
+                user_id=request.user_id,
+                user_query=request.user_query,
+                messages=messages,
+                routing_strategy=routing_strategy.value,
+                expertise_level=request.expertise_level.value,
+                analysis_results=request.analysis_results,
+                metadata={
+                    'has_conversation_history': bool(request.conversation_history),
+                    'conversation_count': len(request.conversation_history) if request.conversation_history else 0
+                }
+            )
             
             # ========================================
             # STEP 4: Get LLM config for expertise level
@@ -122,6 +140,19 @@ class AstroSageClient:
             # ========================================
             response_content = self._extract_response_content(response_data)
             tokens_used = self._extract_tokens_used(response_data)
+
+            response_time = time.time() - start_time
+            
+            # Log response
+            if log_id:
+                prompt_logger.log_astrosage_response(
+                    log_id=log_id,
+                    response=response_content,
+                    tokens_used=tokens_used,
+                    response_time=response_time,
+                    model_used=self.model,
+                    success=True
+                )
 
             # ========================================
             # STEP 7: Save conversation to database
@@ -150,7 +181,8 @@ class AstroSageClient:
                 f"AstroSage query completed: "
                 f"session={request.session_id}, "
                 f"time={response_time:.2f}s, "
-                f"tokens={tokens_used}"
+                f"tokens={tokens_used}, "
+                f"log_id={log_id[:8] if log_id else 'N/A'}"
             )
             
             return astrosage_response

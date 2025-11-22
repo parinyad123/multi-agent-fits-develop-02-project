@@ -105,6 +105,11 @@ class Settings(BaseSettings):
         extra='ignore'  # Ignore extra fields in .env
     )
 
+    # ==========================================
+    #  Prompt log directory
+    # ==========================================
+    prompt_log_dir: Optional[str] = None
+
 
     # ==========================================
     # Properties (Directory Paths)

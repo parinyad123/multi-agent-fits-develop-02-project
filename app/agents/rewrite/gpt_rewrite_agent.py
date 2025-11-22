@@ -6,8 +6,10 @@ from openai import AsyncOpenAI
 from typing import Dict, List, Any, Optional
 import logging
 from datetime import datetime
+from uuid import UUID
 
 from app.core.config import settings
+from app.core.prompt_logger import prompt_logger
 from app.agents.rewrite.models import RewriteRequest, RewriteResponse
 from app.agents.rewrite.prompt_builder import RewritePromptBuilder
 
@@ -74,6 +76,10 @@ class GPTRewriteAgent:
         """
         Main entry point with automatic model selection
         """
+
+        log_id = None  # Track log ID
+        retry_count = 0
+        validation_errors = []
         
         # Determine which model to use
         model_tier = self._select_model(context, intermediate_results)
@@ -87,13 +93,31 @@ class GPTRewriteAgent:
             # Build prompt
             messages = self.prompt_builder.build_prompt(request)
 
-            # Select model
-            model_tier = self._select_model(context, intermediate_results)
+            # Log prompt BEFORE calling GPT
+            log_id = prompt_logger.log_rewrite_prompt(
+                session_id=context.get('session_id', 'unknown'),
+                user_id=context.get('user_id', UUID('00000000-0000-0000-0000-000000000000')),
+                user_query=user_input,
+                messages=messages,
+                routing_strategy=request.routing_strategy,
+                expertise_level=request.expertise_level,
+                intermediate_results=intermediate_results,
+                model_tier=model_tier,
+                metadata={
+                    'auto_upgrade': self.auto_upgrade,
+                    'complexity_indicators': self._get_complexity_indicators(context, intermediate_results)
+                }
+            )
             
             # Call GPT with selected model
+            start_time = datetime.now()
             response = await self._call_gpt(messages, model_tier)
+            response_time = (datetime.now() - start_time).total_seconds()
 
-            # ✅ NEW: Validate response length
+            # Get model config for token tracking
+            config = self.MODELS[model_tier]
+
+            #  Validate response length
             astrosage_content = self._extract_astrosage_content(intermediate_results)
             
             if astrosage_content:
@@ -108,6 +132,10 @@ class GPTRewriteAgent:
                         f"Response: {response_word_count} words. "
                         f"Retrying with stronger prompt..."
                     )
+
+                    validation_errors.append(
+                        f"Response too short: {response_word_count} < {astrosage_word_count * 0.8:.0f} words"
+                    )
                     
                     # Retry with explicit reminder
                     messages[-1]['content'] += (
@@ -117,12 +145,43 @@ class GPTRewriteAgent:
                         "DO NOT SUMMARIZE IT!"
                     )
                     
+                    retry_count += 1
                     response = await self._call_gpt(messages, model_tier)
+                    response_time = (datetime.now() - start_time).total_seconds()
+
+                #  Log response
+                if log_id:
+                    # Estimate tokens (rough approximation)
+                    estimated_tokens = len(response) // 4
+                    
+                    prompt_logger.log_rewrite_response(
+                        log_id=log_id,
+                        response=response,
+                        tokens_used=estimated_tokens,
+                        response_time=response_time,
+                        model_used=config["name"],
+                        validation_passed=len(validation_errors) == 0,
+                        validation_errors=validation_errors if validation_errors else None,
+                        retry_count=retry_count
+                    )
             
             return response
             
         except Exception as e:
             logger.error(f"Rewrite failed: {e}", exc_info=True)
+
+            # Log error
+            if log_id:
+                prompt_logger.log_rewrite_response(
+                    log_id=log_id,
+                    response="",
+                    tokens_used=0,
+                    response_time=0,
+                    model_used="unknown",
+                    validation_passed=False,
+                    validation_errors=[str(e)],
+                    retry_count=retry_count
+                )
             
             # Fallback strategy
             if model_tier != "turbo":
@@ -135,6 +194,35 @@ class GPTRewriteAgent:
             
             # Final fallback: basic formatting
             return self._create_fallback_response(intermediate_results)
+        
+    def _get_complexity_indicators(
+        self,
+        context: Dict[str, Any],
+        intermediate_results: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Extract complexity indicators for logging"""
+        
+        indicators = {
+            'expertise': context.get('user_expertise', 'intermediate'),
+            'num_steps': len(intermediate_results),
+            'has_analysis': False,
+            'has_astrosage': False,
+            'num_analyses': 0
+        }
+        
+        for step in intermediate_results:
+            step_name = step.get('step')
+            
+            if step_name == 'analysis':
+                indicators['has_analysis'] = True
+                result = step.get('analysis_result', {})
+                results = result.get('results', {})
+                indicators['num_analyses'] = len(results)
+            
+            elif step_name == 'astrosage':
+                indicators['has_astrosage'] = True
+        
+        return indicators
         
     def _extract_astrosage_content(self, intermediate_results: List[Dict]) -> str:
         """Extract AstroSage response content"""

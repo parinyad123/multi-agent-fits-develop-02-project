@@ -85,7 +85,7 @@ async def lifespan(app: FastAPI):
     # Register Rewrite Agent
     # ========================================
     rewrite_agent = GPTRewriteAgent(
-        default_model="turbo",
+        default_model="standard", # mini, turbo, standard
         auto_upgrade=False
     )
     orchestrator.register_agent(AgentNames.REWRITE, rewrite_agent)

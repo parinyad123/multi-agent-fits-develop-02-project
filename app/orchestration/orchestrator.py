@@ -9,11 +9,11 @@ multi-agent-fits-dev-02/app/orchestration/orchestrator.py
 import asyncio
 import logging
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4, UUID
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, validator
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -46,11 +46,42 @@ logger = logging.getLogger(__name__)
 
 class UserRequest(BaseModel):
     user_id: UUID
-    session_id: UUID | None = None
+    session_id: Union[UUID, str, None] = None  #  support UUID, str, None
     request_id: str | None = None
     fits_file_id: str | None = None
     user_query: str
     context: Dict[str, Any] = {}
+
+    @validator('session_id', pre=True)
+    def validate_session_id(cls, v):
+        """
+        Validate and normalize session_id
+        
+        Accepts:
+        - None → None
+        - UUID object → UUID
+        - Valid UUID string → UUID
+        - "null"/"none"/"" → None
+        """
+        
+        if v is None:
+            return None
+        
+        if isinstance(v, UUID):
+            return v
+        
+        if isinstance(v, str):
+            # Handle "null" string
+            if v.lower() in ["null", "none", ""]:
+                return None
+            
+            # Try to parse as UUID
+            try:
+                return UUID(v)
+            except ValueError:
+                raise ValueError(f"Invalid session_id: {v}")
+        
+        raise ValueError(f"session_id must be UUID or None, got {type(v)}")
 
 
 class WorkflowStatus(BaseModel):
@@ -97,6 +128,8 @@ class DynamicWorkflowOrchestrator:
         # Storage for workflow statuses 
         self.workflow_results = OrderedDict() # In memory 
         self.workflow_lock = asyncio.Lock()
+
+        self.cache_timestamps = {}
 
         # Agent registry
         self.agents = {} # Will be registered later
@@ -714,14 +747,14 @@ class DynamicWorkflowOrchestrator:
                 # ========================================
                 if routing_strategy == RoutingStrategy.ASTROSAGE:
                     logger.info(f"Routing strategy: AstroSage only for task {task_id}")
-                    workflow = await self._handle_astrosage(workflow, task_id)
+                    workflow = await self._handle_astrosage(workflow, task_id, session)
                 elif routing_strategy == RoutingStrategy.ANALYSIS:
                     logger.info(f"Routing strategy: Analysis only for task {task_id}")
-                    workflow = await self._handle_analysis(workflow, task_id)
+                    workflow = await self._handle_analysis(workflow, task_id, session)
                 elif routing_strategy == RoutingStrategy.MIXED:
                     logger.info(f"Routing strategy: Mixed for task {task_id}")
-                    workflow = await self._handle_analysis(workflow, task_id)
-                    workflow = await self._handle_astrosage(workflow, task_id)
+                    workflow = await self._handle_analysis(workflow, task_id, session)
+                    workflow = await self._handle_astrosage(workflow, task_id, session)
                 else:
                     raise ValueError(ErrorMessages.INVALID_ROUTING_STRATEGY.format(routing_strategy))
                 
@@ -782,7 +815,7 @@ class DynamicWorkflowOrchestrator:
                 if final_response:
                     await ConversationService.save_assistant_message(
                         session=session,
-                        session_id=session_id,
+                        session_id=str(session_id),
                         user_id=user_id,
                         workflow_id=workflow_id,
                         content=final_response,
@@ -833,9 +866,10 @@ class DynamicWorkflowOrchestrator:
         except Exception as e:
             logger.error(f"Error processing workflow {task_id}: {e}", exc_info=True)
             
-            # Save error to database
+            # ============================================
+            # Error handling with proper start_time check
+            # ============================================
             try:
-                # Create new session for saving error 
                 async with AsyncSessionLocal() as session:
                     await ConversationService.update_workflow_status(
                         session=session,
@@ -846,6 +880,10 @@ class DynamicWorkflowOrchestrator:
                     await session.commit()
             except Exception as db_error:
                 logger.error(f"Failed to save error to database: {db_error}")
+            
+            # Handle missing start_time
+            if 'start_time' not in locals():
+                start_time = workflow.get('created_at', datetime.now())
             
             # Update in-memory status
             workflow['status'] = WorkflowStatusType.FAILED

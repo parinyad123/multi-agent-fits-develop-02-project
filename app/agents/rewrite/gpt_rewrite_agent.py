@@ -92,6 +92,32 @@ class GPTRewriteAgent:
             
             # Call GPT with selected model
             response = await self._call_gpt(messages, model_tier)
+
+            # ✅ NEW: Validate response length
+            astrosage_content = self._extract_astrosage_content(intermediate_results)
+            
+            if astrosage_content:
+                astrosage_word_count = len(astrosage_content.split())
+                response_word_count = len(response.split())
+                
+                # Check if response is too short (missing AstroSage content)
+                if response_word_count < astrosage_word_count * 0.8:
+                    logger.warning(
+                        f"⚠️ Response too short! "
+                        f"AstroSage: {astrosage_word_count} words, "
+                        f"Response: {response_word_count} words. "
+                        f"Retrying with stronger prompt..."
+                    )
+                    
+                    # Retry with explicit reminder
+                    messages[-1]['content'] += (
+                        "\n\n🔴 CRITICAL REMINDER: "
+                        "You MUST include the ENTIRE AstroSage response "
+                        f"({astrosage_word_count} words) in your output. "
+                        "DO NOT SUMMARIZE IT!"
+                    )
+                    
+                    response = await self._call_gpt(messages, model_tier)
             
             return response
             
@@ -109,6 +135,13 @@ class GPTRewriteAgent:
             
             # Final fallback: basic formatting
             return self._create_fallback_response(intermediate_results)
+        
+    def _extract_astrosage_content(self, intermediate_results: List[Dict]) -> str:
+        """Extract AstroSage response content"""
+        for step in intermediate_results:
+            if step.get('step') == 'astrosage':
+                return step.get('response', '')
+        return ''
     
     def _select_model(
         self,

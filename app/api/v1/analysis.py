@@ -163,6 +163,13 @@ async def submit_analysis(
     2. Route to Analysis Agent and/or AstroSage
     3. Rewrite Agent → Final response
     4. Save all results to database
+
+    Submit a user request for analysis.
+    
+    **Session ID Handling:**
+    - null → Generate new session (new chat)
+    - "null" (string) → Also treated as new session
+    - Valid UUID → Continue existing session
     
     **Parameters:**
     - **session_id**: Optional session ID (generates new if null for new chat)
@@ -175,30 +182,50 @@ async def submit_analysis(
     - **session_id**: Use this for continuing the conversation
     - **is_new_session**: Whether this is a new chat session
     """
-
-    # Prepare context
-    context = request.context or {}
-
-    # Add user info to context
-    context['user_id'] = str(current_user.user_id)
-    context['user_email'] = current_user.email
-
-    # Generate session_id if null (new chat)
-    session_id = request.session_id or str(uuid4())
-    is_new_session = request.session_id is None
-
-    # Build user request
-    user_request = UserRequest(
-        user_id=current_user.user_id,  # From JWT token (secure)
-        session_id=request.session_id,  # Will be generated in orchestrator if None
-        request_id=str(uuid4()),
-        fits_file_id=request.fits_file_id,
-        user_query=request.user_query,
-        context=context
-    )
-
     try:
-        # Submit to orchestrator
+        # ============================================
+        # STEP 1: Prepare Context
+        # ============================================
+        context = request.context or {}
+        context['user_id'] = str(current_user.user_id)
+        context['user_email'] = current_user.email
+        
+        # ============================================
+        # STEP 2: Handle Session ID
+        # ============================================
+        session_id = request.session_id
+        
+        # Handle string "null" (from Postman/API clients)
+        if isinstance(session_id, str):
+            if session_id.lower() in ["null", "none", ""]:
+                session_id = None
+            else:
+                # Try to parse as UUID
+                try:
+                    session_id = UUID(session_id)
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid session_id format: {session_id}. "
+                                f"Must be a valid UUID or null."
+                    )
+
+        # ============================================
+        # STEP 3: Build User Request
+        # ============================================
+        user_request = UserRequest(
+            user_id=current_user.user_id,  # From JWT token (secure)
+            session_id=request.session_id,  # Will be generated in orchestrator if None
+            request_id=str(uuid4()),
+            fits_file_id=request.fits_file_id,
+            user_query=request.user_query,
+            context=context
+        )
+
+    
+        # ============================================
+        # STEP 4: Submit to Orchestrator
+        # ============================================
         task_id = await orchestrator.submit_request(user_request)
 
         # Get final session_id (might be generated)
@@ -215,12 +242,15 @@ async def submit_analysis(
             success=True,
             task_id=task_id,
             user_id=str(current_user.user_id),
-            session_id=final_session_id,
+            session_id=str(final_session_id),  # Convert UUID to string for JSON
             is_new_session=is_new_session,
             status="submitted",
             message="Request submitted successfully for processing.",
             check_status_url=f"/api/v1/analyze/{task_id}"
         )
+    
+    except HTTPException:
+        raise
 
     except ValueError as e:
         # Validation errors
@@ -232,10 +262,10 @@ async def submit_analysis(
         
     except RuntimeError as e:
         # Runtime errors (session/workflow creation)
-        logger.error(f"Runtime error: {e}", exc_info=True)
+        logger.error(f"Unexpected error: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process request: {str(e)}"
+            detail="An unexpected error occurred while processing your request."
         )
         
     except Exception as e:

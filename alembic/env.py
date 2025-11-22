@@ -16,8 +16,8 @@ from app.db import models  # Import models to register them
 config = context.config
 
 # Override sqlalchemy.url from settings
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("+asyncpg", ""))
-
+# config.set_main_option("sqlalchemy.url", settings.database_url.replace("+asyncpg", ""))
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
@@ -57,20 +57,31 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        #Add: Enable type comparison
+        compare_type=True,
+        compare_server_default=True,
     )
 
     with context.begin_transaction():
         context.run_migrations()
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection, 
+        target_metadata=target_metadata,
+        # ADD: Enable type comparison
+        compare_type=True,
+        compare_server_default=True,
+        # ADD: Render as batch for SQLite compatibility (optional)
+        render_as_batch=False,
+    )
 
     with context.begin_transaction():
         context.run_migrations()
 
 async def run_async_migrations() -> None:
     """Run migrations in 'online' mode with async support."""
-    configuration = config.get_section(config.config_ini_section)
+    configuration = config.get_section(config.config_ini_section, {})
     configuration["sqlalchemy.url"] = settings.database_url
     
     connectable = async_engine_from_config(

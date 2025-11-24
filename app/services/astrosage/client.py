@@ -22,7 +22,8 @@ from app.services.astrosage.models import (
     AstroSageTimeoutError,
     AstroSageInvalidResponseError
 )
-from app.services.astrosage.prompt_builder import PromptBuilder
+# from app.services.astrosage.prompt_builder import PromptBuilder
+from app.services.astrosage.prompt_builder_minimal import PromptBuilder
 from app.services.astrosage.conversation_manager import ConversationManager
 from app.services.astrosage.expertise_adapter import ExpertiseAdapter
 

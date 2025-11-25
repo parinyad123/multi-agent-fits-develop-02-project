@@ -14,6 +14,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import hashlib
 
+from app.core.config import settings
+from sqlalchemy.ext.asyncio import AsyncSession
+
+
 # LangChain imports
 try:
     from langchain_openai import ChatOpenAI
@@ -83,7 +87,7 @@ class UnifiedFITSClassificationAgent:
     """
     
     def __init__(self, 
-                 model_name: str = "gpt-3.5-turbo", 
+                 model_name: str = "gpt-4o-mini", 
                  temperature: float = 0.1,
                  max_tokens: int = 1500):
         self.name = "UnifiedFITSAgent_v2.2"
@@ -539,11 +543,20 @@ class UnifiedFITSClassificationAgent:
 
             # Apply parameter inheritance from history
             if history_context.get("has_history"):
+                self.logger.info("History detected, checking inheritance...")
+
                 result = await self._apply_parameter_inheritance(
                     result=result,
                     history_context=history_context,
                     user_input=user_input
                 )
+
+                # LOG AFTER INHERITANCE
+                self.logger.info("=" * 80)
+                self.logger.info("AFTER INHERITANCE:")
+                self.logger.info(f"  analysis_types: {result.analysis_types}")
+                self.logger.info(f"  parameters: {result.parameters}")
+                self.logger.info("=" * 80)
             
             # Post-processing detection of missed mixed requests
             result = self._detect_missed_mixed_requests(result, user_input)
@@ -560,6 +573,12 @@ class UnifiedFITSClassificationAgent:
             
             # Validate parameters
             result = self._validate_and_optimize_parameters(result)
+
+            # LOG AFTER VALIDATION
+            self.logger.info("=" * 80)
+            self.logger.info("AFTER VALIDATION:")
+            self.logger.info(f"  parameters: {result.parameters}")
+            self.logger.info("=" * 80)
             
             # Update stats
             self.stats["intent_distribution"][result.primary_intent] += 1
@@ -692,7 +711,12 @@ class UnifiedFITSClassificationAgent:
         context: Dict[str, Any],
         history_context: Dict[str, Any] = None
     ) -> str:
-        """Build comprehensive prompt with history"""
+        """
+        Build comprehensive prompt with enhanced history context.
+        
+        FIXED: Now includes actual last_parameters values in prompt
+        so LLM can properly inherit parameters.
+        """
         
         # Build context section
         context_info = []
@@ -709,79 +733,131 @@ class UnifiedFITSClassificationAgent:
             prev = ", ".join(context["previous_analyses"])
             context_info.append(f"📊 Previous analyses: {prev}")
 
-        # ✅ NEW: Add history information
-        if history_context.get("has_history"):
+        # ✅ Add history information to context_info
+        if history_context and history_context.get("has_history"):
             context_info.append("📝 Conversation history available")
             
-            # Add last parameters info
+            # Add brief summary in context_info
             last_params = history_context.get("last_parameters")
             if last_params:
                 param_types = [k for k in last_params.keys() if not k.startswith("_")]
                 if param_types:
-                    context_info.append(f"🔧 Last used parameters: {', '.join(param_types)}")
-                    
-                    # Show last parameter values (brief)
-                    for ptype in param_types:
-                        params = last_params[ptype]
-                        key_params = {k: v for k, v in params.items() 
-                                    if k in ["bins", "A0", "b0", "fb0", "low_freq", "high_freq"]}
-                        if key_params:
-                            context_info.append(f"   {ptype}: {key_params}")
+                    context_info.append(f"🔧 Last used: {', '.join(param_types)}")
         
-        # return f"""
-        #     UNIFIED FITS ANALYSIS REQUEST
+        # Start building prompt
+        prompt = f"""UNIFIED FITS ANALYSIS REQUEST
 
-        #     USER INPUT: "{user_input}"
+    USER INPUT: "{user_input}"
 
-        #     CONTEXT INFORMATION:
-        #     {chr(10).join(context_info) if context_info else "No additional context"}
+    CONTEXT INFORMATION:
+    {chr(10).join(context_info) if context_info else "No additional context"}
 
-        #     TASK: Provide comprehensive classification, question categorization, and parameter extraction.
-
-        #     🚨 CRITICAL: Pay special attention to astrophysics interpretation requests!
-        #     - If user asks to "discuss", "explain", "compare" physical processes → MIXED
-        #     - If user mentions accretion/turbulence/spectral physics → MIXED
-        #     - Analysis + interpretation = ALWAYS MIXED
-
-        #     RESPOND WITH COMPLETE JSON:
-        #     """
-        prompt = f"""
-            UNIFIED FITS ANALYSIS REQUEST
-
-            USER INPUT: "{user_input}"
-
-            CONTEXT INFORMATION:
-            {chr(10).join(context_info) if context_info else "No additional context"}
-
-            TASK: Provide comprehensive classification, question categorization, and parameter extraction.
-
-            🚨 HISTORY CONTEXT:
-            """
+    TASK: Provide comprehensive classification, question categorization, and parameter extraction.
+    """
         
-        # ✅ NEW: Add formatted history if available
-        if history_context.get("has_history"):
-            prompt += """
-                ✅ User has previous analyses in this session.
-                - If user says "again", "same", "repeat", "last settings" → they want to reuse parameters
-                - Only extract explicitly mentioned NEW parameter values
-                - Mark inherited parameters appropriately
-                """
+        # ✅ CRITICAL FIX: Add detailed parameter inheritance section
+        if history_context and history_context.get("has_history"):
+            last_params = history_context.get("last_parameters")
+            
+            if last_params:
+                prompt += """
+
+    ═══════════════════════════════════════════════════════════════════
+    🔧 PARAMETER INHERITANCE CONTEXT (CRITICAL - READ CAREFULLY!)
+    ═══════════════════════════════════════════════════════════════════
+
+    ✅ User has PREVIOUS ANALYSES in this session.
+
+    """
+                # Show last parameters with full details
+                for ptype, params in last_params.items():
+                    if not ptype.startswith("_"):
+                        prompt += f"📊 LAST {ptype.upper().replace('_', ' ')} PARAMETERS:\n"
+                        
+                        # Group parameters for readability
+                        important_params = {}
+                        other_params = {}
+                        
+                        for key, value in params.items():
+                            if key in ["bins", "A0", "b0", "fb0", "sh0", "low_freq", "high_freq", 
+                                    "noise_bound_percent"]:
+                                important_params[key] = value
+                            else:
+                                other_params[key] = value
+                        
+                        # Show important params first
+                        if important_params:
+                            prompt += "  Key parameters:\n"
+                            for key, value in important_params.items():
+                                prompt += f"    • {key}: {value}\n"
+                        
+                        # Show other params
+                        if other_params:
+                            prompt += "  Other parameters:\n"
+                            for key, value in other_params.items():
+                                prompt += f"    • {key}: {value}\n"
+                        
+                        prompt += "\n"
+                
+                prompt += """🚨 INHERITANCE RULES (APPLY STRICTLY):
+
+    1. **Keywords Detection:**
+    - "again", "same", "repeat", "last", "previous" → User wants to REUSE parameters
+    - "again with X=Y" → User wants to INHERIT + OVERRIDE specific parameter X
+    - "reset", "default", "fresh", "new" → User wants NEW analysis (DON'T inherit)
+
+    2. **Analysis Type Preservation:**
+    🔴 CRITICAL: If user says "again" or "same", you MUST preserve the SAME analysis_type!
+    
+    Example:
+    Last analysis: power_law
+    User: "Again with A0=5"
+    → analysis_types: ["power_law"]  ← MUST BE SAME!
+    → NOT ["statistics"] or anything else!
+
+    3. **Parameter Inheritance:**
+    - "Again" alone → Inherit ALL parameters (exact copy)
+    - "Again with X=Y" → Inherit ALL + Override X with new value Y
+    - "Again with X=Y, Z=W" → Inherit ALL + Override X and Z
+
+    4. **Parameter Override Detection:**
+    User explicitly mentions parameter → Use new value
+    User doesn't mention parameter → Use inherited value
+    
+    Example:
+    Last: {A0: 2, bins: 5000, b0: 1.0}
+    User: "Again with A0=5"
+    Result: {A0: 5, bins: 5000, b0: 1.0}  ← Only A0 changed!
+
+    ═══════════════════════════════════════════════════════════════════
+
+    """
         else:
             prompt += """
-                ❌ No previous history available.
-                - Extract all parameters from query or use defaults
-                """
+
+    🚨 HISTORY CONTEXT:
+    ═══════════════════════════════════════════════════════════════════
+    ❌ No previous history available.
+
+    INSTRUCTIONS:
+    - Extract all parameters explicitly mentioned in user query
+    - Use default values for parameters not specified
+    - No inheritance possible (first query in session)
+
+    ═══════════════════════════════════════════════════════════════════
+
+    """
         
         prompt += """
+    🚨 ASTROPHYSICS INTERPRETATION DETECTION:
+    - If user asks to "discuss", "explain", "compare" physical processes → MIXED
+    - If user mentions accretion/turbulence/spectral physics + analysis → MIXED
+    - Analysis + interpretation = ALWAYS MIXED
+    - Pure "explain X" without analysis → GENERAL (not mixed)
 
-                🚨 CRITICAL: Pay special attention to astrophysics interpretation requests!
-                - If user asks to "discuss", "explain", "compare" physical processes → MIXED
-                - If user mentions accretion/turbulence/spectral physics → MIXED
-                - Analysis + interpretation = ALWAYS MIXED
-
-                RESPOND WITH COMPLETE JSON:
-                """
-        
+    RESPOND WITH COMPLETE JSON (follow exact schema from system prompt):
+    """
+    
         return prompt
     
     def _parse_unified_response(self, raw_output: str) -> UnifiedFITSResult:
@@ -1195,6 +1271,90 @@ class UnifiedFITSClassificationAgent:
                 f"implicit={has_matching_type}"
             )
             return self._apply_inheritance(result, last_parameters)
+        
+        return result
+    
+    def _apply_inheritance(
+        self,
+        result: UnifiedFITSResult,
+        last_parameters: Dict[str, Any]
+    ) -> UnifiedFITSResult:
+        """
+        Apply parameter inheritance from last analysis.
+        
+        This method performs the actual inheritance:
+        1. Identifies matching analysis types
+        2. Merges last parameters with current parameters
+        3. Updates parameter_source to indicate inheritance
+        
+        Args:
+            result: Current classification result
+            last_parameters: Parameters from last analysis
+            
+        Returns:
+            Updated result with inherited parameters
+        """
+        
+        self.logger.info("=" * 80)
+        self.logger.info("🔄 APPLYING PARAMETER INHERITANCE")
+        self.logger.info(f"  Analysis types: {result.analysis_types}")
+        self.logger.info(f"  Last parameters: {last_parameters}")
+        self.logger.info("=" * 80)
+        
+        # Track which parameters were inherited
+        inherited_types = []
+        
+        for analysis_type in result.analysis_types:
+            # Check if we have last parameters for this analysis type
+            if analysis_type in last_parameters:
+                last_params = last_parameters[analysis_type]
+                
+                # Get current parameters (if any)
+                current_params = result.parameters.get(analysis_type, {})
+
+                self.logger.info(f"📊 {analysis_type}:")
+                self.logger.info(f"  Last params: {last_params}")
+                self.logger.info(f"  Current params: {current_params}")
+                
+                # Merge: last_params as base, current_params override
+                merged_params = last_params.copy()
+                merged_params.update(current_params)
+
+                self.logger.info(f"  Merged params: {merged_params}")
+                
+                # Update result
+                result.parameters[analysis_type] = merged_params
+                
+                # Update parameter source
+                if current_params:
+                    # Some parameters were explicitly specified
+                    result.parameter_source[analysis_type] = "inherited_with_override"
+                    result.parameter_confidence[analysis_type] = 0.9
+                    
+                    self.logger.info(
+                        f"  ✅ {analysis_type}: Inherited {len(last_params)} params, "
+                        f"overrode {len(current_params)} params"
+                    )
+                else:
+                    # All parameters inherited
+                    result.parameter_source[analysis_type] = "inherited"
+                    result.parameter_confidence[analysis_type] = 0.95
+                    
+                    self.logger.info(
+                        f"  ✅ {analysis_type}: Inherited all {len(last_params)} params"
+                    )
+                
+                inherited_types.append(analysis_type)
+
+        self.logger.info("=" * 80)
+        self.logger.info(f"✅ Inheritance complete: {inherited_types}")
+        self.logger.info("=" * 80)
+            
+        # Update reasoning
+        if inherited_types:
+            result.reasoning += (
+                f" [Parameter inheritance applied for: {', '.join(inherited_types)}]"
+            )
         
         return result
 

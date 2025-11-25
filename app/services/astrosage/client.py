@@ -27,6 +27,8 @@ from app.services.astrosage.prompt_builder_minimal import PromptBuilder
 from app.services.astrosage.conversation_manager import ConversationManager
 from app.services.astrosage.expertise_adapter import ExpertiseAdapter
 
+from app.services.conversation_history_service import ConversationHistoryService
+
 logger = logging.getLogger(__name__)
 
 class AstroSageClient:
@@ -91,17 +93,71 @@ class AstroSageClient:
             # ========================================
             # STEP 2: Get conversation history if not provided
             # ========================================
-            if request.conversation_history is None:
-                request.conversation_history = await ConversationManager.get_last_conversations(
-                    request.session_id,
-                    db_session,
-                    limit=settings.conversation_history_limit
-                )
+            # if request.conversation_history is None:
+            #     request.conversation_history = await ConversationManager.get_last_conversations(
+            #         request.session_id,
+            #         db_session,
+            #         limit=settings.conversation_history_limit
+            #     )
+
+            conversation_history = []
+            
+            if request.session_id:
+                try:
+                    # Load recent messages
+                    messages = await ConversationHistoryService.get_recent_messages(
+                        session=db_session,
+                        session_id=request.session_id,
+                        limit=10,  # Last 10 messages
+                        include_system=False,
+                        max_tokens=3000  # Keep enough space for response
+                    )
+                    
+                    # Load recent analysis results
+                    last_results = await ConversationHistoryService.get_last_analysis_results(
+                        session=db_session,
+                        session_id=request.session_id,
+                        limit=3  # Last 3 analyses
+                    )
+                    
+                    # Format for AstroSage (OpenAI format)
+                    conversation_history = ConversationHistoryService.format_for_astrosage(
+                        messages=messages,
+                        last_results=last_results,
+                        max_tokens=3000,
+                        include_analysis_results=True
+                    )
+                    
+                    logger.info(
+                        f"Loaded conversation history: "
+                        f"{len(messages)} messages, {len(last_results)} analyses"
+                    )
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to load conversation history: {e}")
+                    conversation_history = []
 
             # ========================================
             # STEP 3: Build prompt
             # ========================================
             messages = PromptBuilder.build_full_prompt(request, routing_strategy)
+
+            # ========================================
+            # STEP 3.5: Inject conversation history
+            # ========================================
+            if conversation_history:
+                # messages = [system, user]
+                # Insert history BETWEEN system and user
+                messages = [
+                    messages[0],  # system prompt
+                    *conversation_history,  # conversation history
+                    messages[1]   # current user query
+                ]
+                
+                logger.debug(
+                    f"Injected conversation history: "
+                    f"total messages={len(messages)}"
+                )
 
             # Log prompt BEFORE calling LLM
             log_id = prompt_logger.log_astrosage_prompt(

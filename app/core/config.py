@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     database_pool_pre_ping: bool = True  # Verify connections before using
 
     # ==========================================
+    # Classification & parameter Agent
+    # ==========================================
+    CLASSIFICATION_MODEL: str = "gpt-4o-mini"   # gpt-3.5-turbo, gpt-4o-mini
+
+    # ==========================================
     # AstroSage Service
     # ==========================================
     astrosage_base_url: str = "http://192.168.156.22:8080"

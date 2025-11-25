@@ -165,33 +165,35 @@ class DynamicWorkflowOrchestrator:
         # ============================================
         # STEP 2: Validate and prepare session_id
         # ============================================
-        # ✅ FIX: Ensure session_id is UUID (or generate new)
-        if user_request.session_id:
-            try:
-                # Validate existing session_id
-                if isinstance(user_request.session_id, str):
-                    session_id = UUID(user_request.session_id)
-                else:
-                    session_id = user_request.session_id
-                is_new_session = False
-            except (ValueError, AttributeError) as e:
-                logger.error(f"Invalid session_id format: {user_request.session_id}")
-                raise ValueError(f"Invalid session_id: {str(e)}")
-        else:
-            # Generate new session for new chat
-            session_id = uuid4()
-            is_new_session = True
+        # Ensure session_id is UUID (or generate new)
+        # if user_request.session_id:
+        #     try:
+        #         # Validate existing session_id
+        #         if isinstance(user_request.session_id, str):
+        #             session_id = UUID(user_request.session_id)
+        #         else:
+        #             session_id = user_request.session_id
+        #         is_new_session = False
+        #     except (ValueError, AttributeError) as e:
+        #         logger.error(f"Invalid session_id format: {user_request.session_id}")
+        #         raise ValueError(f"Invalid session_id: {str(e)}")
+        # else:
+        #     # Generate new session for new chat
+        #     session_id = uuid4()
+        #     is_new_session = True
         
-        logger.info(
-            f"Processing request: task_id={task_id}, "
-            f"session_id={session_id}, "
-            f"is_new={is_new_session}"
-        )
+        # logger.info(
+        #     f"Processing request: task_id={task_id}, "
+        #     f"session_id={session_id}, "
+        #     f"is_new={is_new_session}"
+        # )
         
         # ============================================
         # STEP 3: Database Operations (Single Transaction)
         # ============================================
         workflow_id = None
+        session_id = None
+        is_new_session = False
         
         try:
             async with AsyncSessionLocal() as session:
@@ -199,35 +201,58 @@ class DynamicWorkflowOrchestrator:
                 # ----------------------------------------
                 # 3.1: Ensure Session Exists
                 # ----------------------------------------
-                # ✅ FIX: Use get-or-create pattern (NO duplicate!)
-                result = await session.execute(
-                    select(SessionModel).where(SessionModel.session_id == session_id)
+                # Use get-or-create pattern (NO duplicate!)
+                # result = await session.execute(
+                #     select(SessionModel).where(SessionModel.session_id == session_id)
+                # )
+                # session_record = result.scalar_one_or_none()
+                
+                # if not session_record:
+                #     logger.info(f"Creating new session: {session_id}")
+                    
+                #     session_record = SessionModel(
+                #         session_id=session_id,
+                #         user_id=user_request.user_id,
+                #         created_at=datetime.now(),
+                #         last_activity_at=datetime.now(),
+                #         is_active=True,
+                #         session_metadata={}
+                #     )
+                    
+                #     session.add(session_record)
+                #     await session.flush()  # ✅ Flush to get session_id for FK
+                    
+                #     logger.info(f"✅ Session created: {session_id}")
+                # else:
+                #     # Update existing session activity
+                #     session_record.last_activity_at = datetime.now()
+                #     await session.flush()
+                    
+                #     logger.info(f"✅ Session exists, updated activity: {session_id}")
+                
+                # Use get_or_create_session with auto-resume
+                session_id, is_new_session = await ConversationService.get_or_create_session(
+                    session=session,
+                    user_id=user_request.user_id,
+                    session_id=user_request.session_id,
+                    file_id=UUID(
+                        user_request.fits_file_id
+                        .replace('.fits', '')
+                        .replace('.fit', '')
+                        ) if user_request.fits_file_id else None
                 )
-                session_record = result.scalar_one_or_none()
                 
-                if not session_record:
-                    logger.info(f"Creating new session: {session_id}")
-                    
-                    session_record = SessionModel(
-                        session_id=session_id,
-                        user_id=user_request.user_id,
-                        created_at=datetime.now(),
-                        last_activity_at=datetime.now(),
-                        is_active=True,
-                        session_metadata={}
-                    )
-                    
-                    session.add(session_record)
-                    await session.flush()  # ✅ Flush to get session_id for FK
-                    
-                    logger.info(f"✅ Session created: {session_id}")
+                # Update user_request with confirmed session_id
+                if isinstance(user_request, dict):
+                    user_request['session_id'] = session_id
                 else:
-                    # Update existing session activity
-                    session_record.last_activity_at = datetime.now()
-                    await session.flush()
-                    
-                    logger.info(f"✅ Session exists, updated activity: {session_id}")
+                    user_request.session_id = session_id
                 
+                logger.info(
+                    f"Session: {session_id} "
+                    f"({'new' if is_new_session else 'resumed'})"
+                )
+
                 # ----------------------------------------
                 # 3.2: Validate FITS File (if provided)
                 # ----------------------------------------
@@ -238,7 +263,7 @@ class DynamicWorkflowOrchestrator:
                         file_id_str = user_request.fits_file_id.replace('.fits', '').replace('.fit', '')
                         file_id_uuid = UUID(file_id_str)
                         
-                        # ✅ Validate file exists and belongs to user
+                        # Validate file exists and belongs to user
                         file_result = await session.execute(
                             select(FITSFile).where(
                                 FITSFile.file_id == file_id_uuid,
@@ -303,7 +328,7 @@ class DynamicWorkflowOrchestrator:
                 await session.commit()
                 
                 logger.info(
-                    f"✅ Database transaction committed: "
+                    f"Database transaction committed: "
                     f"session={session_id}, workflow={workflow_id}"
                 )
         
@@ -326,10 +351,11 @@ class DynamicWorkflowOrchestrator:
         # STEP 4: Update user_request with final session_id
         # ============================================
         # ✅ FIX: Update request object with confirmed session_id
-        if isinstance(user_request, dict):
-            user_request['session_id'] = str(session_id)
-        else:
-            user_request.session_id = str(session_id)
+        # if isinstance(user_request, dict):
+        #     user_request['session_id'] = str(session_id)
+        # else:
+        #     user_request.session_id = str(session_id)
+        
         
         # ============================================
         # STEP 5: Initialize workflow in memory

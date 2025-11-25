@@ -375,7 +375,11 @@ class FittingCapability(AnalysisCapability):
                 },
                 "initial_parameters": initial_params,
                 "parameter_bounds": {
-                    k: [float(v[0]), "unbounded" if np.isinf(v[1]) else float(v[1])]
+                    # k: [float(v[0]), "unbounded" if np.isinf(v[1]) else float(v[1])]
+                    k: [
+                        float(v[0]),
+                        "unbounded" if np.isinf(float(v[1])) else float(v[1])
+                    ]
                     for k, v in param_bounds.items()
                 },
                 "parameters_used": {
@@ -482,7 +486,11 @@ class FittingCapability(AnalysisCapability):
                     k: float(v) for k, v in initial_params.items()
                 },
                 "parameter_bounds": {
-                    k: [float(v[0]), "unbounded" if np.isinf(v[1]) else float(v[1])]
+                    # k: [float(v[0]), "unbounded" if np.isinf(v[1]) else float(v[1])]
+                    k: [
+                        float(v[0]),
+                        "unbounded" if np.isinf(float(v[1])) else float(v[1])
+                    ]
                     for k, v in param_bounds.items()
                 },
                 "parameters_used": {

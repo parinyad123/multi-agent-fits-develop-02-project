@@ -242,3 +242,113 @@ class ConversationService:
             "completed_at": workflow.completed_at.isoformat() if workflow.completed_at else None,
             "execution_time_seconds": workflow.execution_time_seconds
         }
+    
+    @staticmethod
+    async def get_or_create_session(
+        session: AsyncSession,
+        user_id: UUID,
+        session_id: Optional[str] = None,
+        file_id: Optional[UUID] = None
+    ) -> tuple[str, bool]:
+        """
+        Get or create session 
+        
+        - session_id provided → Use existing session
+        - session_id = None → ALWAYS create NEW session
+        
+        Args:
+            session: Database session
+            user_id: User UUID
+            session_id: Optional session ID
+            file_id: Optional file ID for context
+            
+        Returns:
+            Tuple of (session_id, is_new_session)
+        """
+        
+        from datetime import datetime, timedelta
+        from uuid import uuid4
+        from sqlalchemy import select, desc
+        from app.db.models import Session as SessionModel
+        
+        # ============================================
+        # CASE 1: session_id provided → Use existing
+        # ============================================
+        if session_id:
+            try:
+                # Validate session exists
+                query = select(SessionModel).where(
+                    SessionModel.session_id == session_id,
+                    SessionModel.user_id == user_id,
+                    SessionModel.is_active == True
+                )
+                
+                result = await session.execute(query)
+                existing_session = result.scalar_one_or_none()
+                
+                if not existing_session:
+                    # Session not found or doesn't belong to user
+                    logger.warning(
+                        f"Session not found or access denied: {session_id} "
+                        f"for user {user_id}"
+                    )
+                    # Fall through to create new session
+                    session_id = None
+                else:
+                    # Update last activity
+                    existing_session.last_activity_at = datetime.now()
+                    await session.flush()
+                    
+                    logger.info(f"Using existing session: {session_id}")
+                    return (str(session_id), False)  # is_new_session = False
+                    
+            except Exception as e:
+                logger.error(f"Error validating session: {e}")
+                session_id = None  # Fall through to create new
+        
+        # ============================================
+        # CASE 2: No session_id → ALWAYS create new
+        # ============================================
+        new_session_id = str(uuid4())
+    
+        new_session = SessionModel(
+            session_id=new_session_id,
+            user_id=user_id,
+            created_at=datetime.now(),
+            last_activity_at=datetime.now(),
+            is_active=True,
+            session_metadata={
+                'file_id': str(file_id) if file_id else None,
+                'created_from': 'workflow_submission'
+            }
+        )
+        
+        session.add(new_session)
+        await session.flush()
+        
+        logger.info(f"Created new session: {new_session_id}")
+        
+        return (new_session_id, True)  # is_new_session = True
+        
+        # ============================================
+        # CASE 3: Create new session
+        # ============================================
+        # new_session_id = uuid4()
+        
+        # new_session = SessionModel(
+        #     session_id=new_session_id,
+        #     user_id=user_id,
+        #     created_at=datetime.now(),
+        #     last_activity_at=datetime.now(),
+        #     is_active=True,
+        #     session_metadata={
+        #         "file_id": str(file_id) if file_id else None,
+        #         "created_from": "auto_create"
+        #     }
+        # )
+        
+        # session.add(new_session)
+        # await session.flush()
+        
+        # logger.info(f"Created new session: {new_session_id}")
+        # return str(new_session_id), True

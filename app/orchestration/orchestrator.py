@@ -25,7 +25,7 @@ from app.core.constants import AnalysisStatus
 
 from app.agents.classification_parameter.unified_FITS_classification_parameter_agent import UnifiedFITSClassificationAgent
 
-from app.services.astrosage.models import AstroSageRequest
+from app.services.astrosage.models import AstroSageRequest, ExpertiseLevel
 from app.services.conversation_service import ConversationService
 
 from app.core.constants import (
@@ -1098,10 +1098,29 @@ class DynamicWorkflowOrchestrator:
                 user_query = user_request.get('user_query')
                 session_id = user_request.get('session_id')
                 user_id = user_request.get('user_id')
+                context = user_request.get('context', {})
             else:
                 user_query = user_request.user_query
                 session_id = user_request.session_id
                 user_id = user_request.user_id
+                context = user_request.context
+
+            # Extract user_expertise from context
+            user_expertise_str = context.get('user_expertise', 'intermediate')
+            # Import required models
+            # from app.services.astrosage.models import AstroSageRequest, ExpertiseLevel
+
+            expertise_mapping = {
+                'beginner': ExpertiseLevel.BEGINNER,
+                'intermediate': ExpertiseLevel.INTERMEDIATE,
+                'advanced': ExpertiseLevel.ADVANCED,
+                'expert': ExpertiseLevel.EXPERT
+            }
+            
+            user_expertise = expertise_mapping.get(
+                user_expertise_str.lower(), 
+                ExpertiseLevel.INTERMEDIATE
+            )
             
             # Get analysis results if available
             analysis_results = None
@@ -1109,16 +1128,14 @@ class DynamicWorkflowOrchestrator:
                 if step['step'] == 'analysis':
                     analysis_results = step.get('analysis_result', {}).get('results')
                     break
-            
-            # Import required models
-            from app.services.astrosage.models import AstroSageRequest
-            
+                 
             # Build AstroSage request
             astrosage_request = AstroSageRequest(
                 user_id=user_id,
                 session_id=session_id,
                 user_query=user_query,
-                analysis_results=analysis_results
+                analysis_results=analysis_results,
+                expertise_level=user_expertise
             )
             
             # Get database session from workflow
@@ -1127,7 +1144,9 @@ class DynamicWorkflowOrchestrator:
             #     raise RuntimeError("Database session not found in workflow")
             
             # Call AstroSage with semaphore
-            logger.info(f"Calling AstroSage for task {task_id}")
+            logger.info(f"Calling AstroSage for task {task_id}"
+                        f"with expertise_level={user_expertise.value}"
+                        )
 
             # Pass the SAME session
             async with self.astrosage_semaphore:

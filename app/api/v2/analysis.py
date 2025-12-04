@@ -105,7 +105,7 @@ async def submit_analysis(
             if not session:
                 raise HTTPException(status_code=404, detail="Session not found")
         
-        # ✅ Build UserRequest for orchestrator
+        # Build UserRequest for orchestrator
         user_request = UserRequest(
             user_id=current_user.user_id,
             session_id=session.session_id if session else None,
@@ -115,12 +115,12 @@ async def submit_analysis(
             context={
                 "user_email": current_user.email,
                 "user_expertise": request.user_expertise,
-                "analysis_types": request.analysis_types,
-                "parameters": request.parameters
+                # "analysis_types": request.analysis_types,
+                # "parameters": request.parameters
             }
         )
         
-        # ✅ Submit to orchestrator
+        # Submit to orchestrator
         task_id = await orchestrator.submit_request(user_request)
         
         # Get final session_id

@@ -30,8 +30,8 @@ class User(Base):
     __tablename__ = "users"
     
     user_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    username = Column(String(100), unique=True, nullable=True)
-    email = Column(String(255), unique=True, nullable=False)
+    username = Column(String(100), unique=True, nullable=False)
+    email = Column(String(255), unique=True, nullable=True)
 
     # Authentication fields
     password_hash = Column(String(255), nullable=True)  # NULL = OAuth users (future)
@@ -52,6 +52,7 @@ class User(Base):
 
     # Indexes
     __table_args__ = (
+        Index("idx_user_username", "username"),
         Index("idx_user_username", "username"),
         Index("idx_user_email", "email"),
         Index("idx_user_is_active", "is_active"),

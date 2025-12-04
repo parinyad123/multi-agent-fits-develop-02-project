@@ -32,7 +32,7 @@ router = APIRouter()
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Register new user",
-    description="Create a new user account with email and password"
+    description="Create a new user account with username and password"
 )
 async def register(
     request: RegisterRequest,
@@ -41,7 +41,7 @@ async def register(
     """
     Register a new user
     
-    - **email**: Valid email address (must be unique)
+    - **username**: Unique username (3-50 chars, alphanumeric + _-)
     - **password**: Password (minimum 8 characters)
     - **username**: Optional username
     """
@@ -49,14 +49,14 @@ async def register(
     try:
         user = await AuthService.create_user(
             session=session,
-            email=request.email,
+            username=request.username,
             password=request.password,
-            username=request.username
+            email=request.email
         )
         
         await session.commit()
         
-        logger.info(f"User registered: {user.email}")
+        logger.info(f"User registered: {user.username}")
         return user
         
     except ValueError as e:
@@ -86,7 +86,7 @@ async def login(
     """
     Login to get access token
     
-    - **email**: User email
+    - **username**: Username
     - **password**: User password
     
     Returns JWT access token valid for 8 hours
@@ -96,14 +96,14 @@ async def login(
         # Authenticate user
         user = await AuthService.authenticate_user(
             session=session,
-            email=request.email,
+            username=request.username,
             password=request.password
         )
         
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect email or password",
+                detail="Incorrect username or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
@@ -112,7 +112,7 @@ async def login(
         
         await session.commit()
         
-        logger.info(f"User logged in: {user.email}")
+        logger.info(f"User logged in: {user.username}")
         
         return TokenResponse(
             access_token=access_token,

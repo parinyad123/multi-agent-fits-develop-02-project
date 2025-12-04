@@ -24,7 +24,7 @@ class AuthService:
     
     Features:
     - User registration
-    - Login with email/password
+    - Login with username/password
     - JWT token generation/verification
     - Basic user management
     """
@@ -32,34 +32,45 @@ class AuthService:
     @staticmethod
     async def create_user(
         session: AsyncSession,
-        email: str,
+        username: str,
         password: str,
-        username: Optional[str] = None
+        email: Optional[str] = None
     ) -> User:
         """
         Create new user
         
         Args:
             session: Database session
-            email: User email (must be unique)
+            username: Username (must be unique)
             password: Plain text password (will be hashed)
-            username: Optional username
+            email: Optional email
             
         Returns:
             Created User object
             
         Raises:
-            ValueError: If email already exists
+            ValueError: If username already exists
         """
+
+        # Normalize username
+        username = username.lower().strip()
         
         # Check if email already exists
         result = await session.execute(
-            select(User).where(User.email == email)
+            select(User).where(User.username == username)
         )
         existing_user = result.scalar_one_or_none()
         
         if existing_user:
-            raise ValueError(f"Email already registered: {email}")
+            raise ValueError(f"Username already registered: {username}")
+        
+        # Check email uniqueness if provided
+        if email:
+            result = await session.execute(
+                select(User).where(User.email == email)
+            )
+            if result.scalar_one_or_none():
+                raise ValueError(f"Email already registered: {email}")
         
         # Create user
         user = User(
@@ -72,52 +83,55 @@ class AuthService:
         session.add(user)
         await session.flush()
         
-        logger.info(f"User created: {user.user_id} ({email})")
+        logger.info(f"User created: {user.user_id} ({username})")
         return user
     
     @staticmethod
     async def authenticate_user(
         session: AsyncSession,
-        email: str,
+        username: str,
         password: str
     ) -> Optional[User]:
         """
-        Authenticate user by email/password
+        Authenticate user by username/password
         
         Args:
             session: Database session
-            email: User email
+            username: Username
             password: Plain text password
             
         Returns:
             User object if authentication successful, None otherwise
         """
+
+        # Normalize username
+        username = username.lower().strip()
         
-        # Get user by email
+        # Get user by username
         result = await session.execute(
-            select(User).where(User.email == email)
+            select(User).where(User.username == username)
         )
         user = result.scalar_one_or_none()
         
         if not user:
-            logger.warning(f"Login failed: email not found ({email})")
+            logger.warning(f"Login failed: username not found ({username})")
             return None
         
         # Check if active
         if not user.is_active:
-            logger.warning(f"Login failed: user inactive ({email})")
+            logger.warning(f"Login failed: user inactive ({username})")
             return None
         
         # Verify password
         if not user.verify_password(password):
-            logger.warning(f"Login failed: wrong password ({email})")
+            logger.warning(f"Login failed: wrong password ({username})")
             return None
         
         # Update last login
         user.last_login_at = datetime.now()
         await session.flush()
         
-        logger.info(f"User authenticated: {user.user_id} ({email})")
+        logger.info(f"User authenticated: {user.user_id} ({username})")
         return user
     
     @staticmethod

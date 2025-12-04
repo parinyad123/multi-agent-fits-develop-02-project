@@ -5,10 +5,11 @@ Request/Response models for auth endpoints
 app/api/v1/auth/schemas.py
 """
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from uuid import UUID
 from datetime import datetime
 from typing import Optional
+import re
 
 # ==========================================
 # Request Schemas
@@ -16,9 +17,30 @@ from typing import Optional
 
 class RegisterRequest(BaseModel):
     """User registration request"""
-    email: EmailStr
+    username: str = Field(..., min_length=3, max_length=50)
     password: str = Field(..., min_length=8, max_length=100)
-    username: Optional[str] = Field(None, min_length=3, max_length=50)
+    email: Optional[EmailStr] = None
+
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, v: str) -> str:
+        """
+        Validate username format:
+        - Only alphanumeric, underscore, hyphen
+        - Must start with letter or number
+        - No consecutive special chars
+        """
+        if not re.match(r'[a-zA-Z0-9][a-zA-Z0-9_-]', v):
+            raise ValueError(
+                'Username must start with letter/number and contain only '
+                'alphanumric characters, underscores, or hyphens'
+            )
+        
+        # No allowed contiguogs special chars 
+        if '--' in v or '--' in v or '_-' in v or '-_' in v:
+            raise ValueError('Username cannot contain consecutive special characters')
+
+        return v.lower()
     
     class Config:
         json_schema_extra = {
@@ -32,7 +54,8 @@ class RegisterRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     """User login request"""
-    email: EmailStr
+    # email: EmailStr
+    username: str
     password: str
 
     class Config:
@@ -67,8 +90,8 @@ class TokenResponse(BaseModel):
 class UserResponse(BaseModel):
     """User information response"""
     user_id: UUID
-    email: str
-    username: Optional[str]
+    username: str
+    email: Optional[str]
     is_active: bool
     created_at: datetime
     last_login_at: Optional[datetime]

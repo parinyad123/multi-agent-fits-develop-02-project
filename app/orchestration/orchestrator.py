@@ -24,6 +24,7 @@ from app.agents.analysis.models import AnalysisRequest, AnalysisResult
 from app.core.constants import AnalysisStatus
 
 from app.agents.classification_parameter.unified_FITS_classification_parameter_agent import UnifiedFITSClassificationAgent
+from app.agents.rewrite.session_title_generator import get_title_generator
 
 from app.services.astrosage.models import AstroSageRequest, ExpertiseLevel
 from app.services.conversation_service import ConversationService
@@ -688,6 +689,7 @@ class DynamicWorkflowOrchestrator:
             
             start_time = datetime.now()
             workflow_id = workflow.get('workflow_id')
+            is_new_session = workflow.get('is_new_session', False)
 
             # ============================================
             # STEP 1: Create ONE database session for entire workflow
@@ -821,6 +823,56 @@ class DynamicWorkflowOrchestrator:
                         },
                         'completed_at': datetime.now().isoformat()
                     })
+
+                # ========================================
+                # STEP 5: GENERATE SESSION TITLE (First Message Only)
+                # ========================================
+                if is_new_session:
+                    logger.info(f"Generating title for new session: {session_id}")
+
+                    try:
+                        title_generator = get_title_generator()
+
+                        # Extract analysis types from classification
+                        analysis_types = classification_result.analysis_types
+
+                        # Get filename
+                        filename = None
+                        if file_id:
+                            # Convert file_id string to UUID
+                            file_id_str = file_id.replace('.fits', '').replace('.fit', '')
+                            file_id_uuid = UUID(file_id_str)
+
+                            file_result = await session.execute(
+                                select(FITSFile).where(FITSFile.file_id == file_id_uuid)
+                            )
+
+                            file_record = file_result.scalar_one_or_none()
+                            if file_record:
+                                filename = file_record.original_filename
+
+                        # Generate title
+                        title = await title_generator.generate_title(
+                            user_query=user_query,
+                            routing_strategy=str(routing_strategy),
+                            analysis_types=analysis_types,
+                            filename=filename,
+                            use_gpt=True  # Try GPT first, fallback to rules
+                        )
+                        
+                        # Save title to database
+                        await ConversationService.update_session_title(
+                            session=session,
+                            session_id=str(session_id),
+                            title=title,
+                            is_user_defined=False  # Auto-generated
+                        )
+                        
+                        logger.info(f"Session title generated: '{title}'")
+
+                    except Exception as e:
+                        logger.error(f"Failed to generate session title: {e}", exc_info=True)
+
 
                 # ========================================
                 # SAVE TO DATABASE

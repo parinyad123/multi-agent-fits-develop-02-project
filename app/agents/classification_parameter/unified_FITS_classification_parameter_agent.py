@@ -123,7 +123,7 @@ class UnifiedFITSClassificationAgent:
             "question_categories": {"astronomy": 0, "physics": 0, "data_analysis": 0, "methods": 0, "unknown": 0},
             "analysis_type_distribution": {"statistics": 0, "psd": 0, "power_law": 0, "bending_power_law": 0, "metadata": 0},
             "parameter_extractions": 0,
-            "auto_corrected_mixed": 0  # ✅ NEW: Track auto-corrections
+            "auto_corrected_mixed": 0  # Track auto-corrections
         }
         
         self.logger.info(f"Unified FITS Agent v2.2 (FIXED) initialized with {model_name}")
@@ -215,7 +215,7 @@ class UnifiedFITSClassificationAgent:
     def _build_comprehensive_system_prompt(self) -> str:
         """
         Build system prompt with FIXED mixed request detection for astrophysics interpretation
-        ✅ CRITICAL FIX: Enhanced patterns for domain-specific interpretation requests
+        Enhanced patterns for domain-specific interpretation requests
         """
         
         # Build parameter documentation

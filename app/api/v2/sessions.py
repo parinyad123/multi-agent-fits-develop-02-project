@@ -8,7 +8,7 @@ import logging
 from uuid import UUID
 
 from app.db.base import get_async_session
-from app.db.models import User, Session as ChatSession, ConversationMessage  # ✅ import ChatSession
+from app.db.models import User, Session as ChatSession, ConversationMessage 
 from app.core.auth import get_current_active_user
 from app.api.v2.models import SessionInfo, SessionListResponse
 
@@ -28,12 +28,11 @@ async def get_user_sessions(
     Returns lightweight session list sorted by last activity DESC.
     """
     try:
-        # ✅ เปลี่ยนจาก DBSession เป็น ChatSession
         query = (
             select(ChatSession)
             .where(ChatSession.user_id == current_user.user_id)
-            .where(ChatSession.is_active == True)  # ✅ ใช้ is_active แทน is_deleted
-            .order_by(desc(ChatSession.last_activity_at))  # ✅ ใช้ last_activity_at
+            .where(ChatSession.is_active == True)
+            .order_by(desc(ChatSession.last_activity_at))
             .offset(offset)
             .limit(limit + 1)
         )
@@ -55,10 +54,17 @@ async def get_user_sessions(
             msg_count_result = await db.execute(msg_count_query)
             message_count = msg_count_result.scalar() or 0
             
-            # Get title from metadata or generate from first message
-            title = "Untitled Session"
-            if session.session_metadata and isinstance(session.session_metadata, dict):
-                title = session.session_metadata.get("title", "Untitled Session")
+            # Use dedicated title field (with fallback)
+            title = session.title
+
+            if not title:
+                # Fallback 1: metadata (for backward compatibility)
+                if session.session_metadata and isinstance(session.session_metadata, dict):
+                    title = session.session_metadata.get("title")
+
+                # Fallback 2: default
+                if not title:
+                    title = "Untitled Session"
             
             session_infos.append(SessionInfo(
                 session_id=str(session.session_id),
@@ -88,7 +94,6 @@ async def delete_session(
 ):
     """Soft delete a session (set is_active=False)"""
     try:
-        # ✅ เปลี่ยนจาก DBSession เป็น ChatSession
         query = select(ChatSession).where(
             ChatSession.session_id == session_id,
             ChatSession.user_id == current_user.user_id
@@ -126,9 +131,8 @@ async def update_session_title(
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_async_session)
 ):
-    """Update session title"""
+    """Update session title (user-defined)"""
     try:
-        # ✅ เปลี่ยนจาก DBSession เป็น ChatSession
         query = select(ChatSession).where(
             ChatSession.session_id == session_id,
             ChatSession.user_id == current_user.user_id
@@ -140,21 +144,32 @@ async def update_session_title(
             raise HTTPException(status_code=404, detail="Session not found")
         
         # Update metadata
-        if not session.session_metadata:
-            session.session_metadata = {}
+        # if not session.session_metadata:
+        #     session.session_metadata = {}
         
-        session.session_metadata["title"] = title
+        # session.session_metadata["title"] = title
         
-        # Mark as modified (for SQLAlchemy to detect change)
-        from sqlalchemy.orm import attributes
-        attributes.flag_modified(session, "session_metadata")
+        # # Mark as modified (for SQLAlchemy to detect change)
+        # from sqlalchemy.orm import attributes
+        # attributes.flag_modified(session, "session_metadata")
         
+        # await db.commit()
+        
+        # logger.info(
+        #     f"Session title updated: user={current_user.user_id}, "
+        #     f"session={session_id}, title={title}"
+        # )
+
+        # Update dedicated title field
+        session.title = title
+        session.is_title_user_defined = True    # Mark as user-defined
+
         await db.commit()
-        
-        logger.info(
-            f"Session title updated: user={current_user.user_id}, "
-            f"session={session_id}, title={title}"
-        )
+
+        # logger.into(
+        #     f"Session title updated by user: user={current_user.user_id}, "
+        #     f"session={session_id}, title='{title}'"
+        # )
         
         return {
             "success": True,

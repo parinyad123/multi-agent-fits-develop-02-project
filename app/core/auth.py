@@ -41,11 +41,14 @@ async def get_current_user(
     
     # Extract token
     token = credentials.credentials
+    logger.info(f"Received token: {token[:20]}...")
     
     # Verify token
     user_id = AuthService.verify_access_token(token)
+    logger.info(f"Decoded user_id: {user_id}")
     
     if not user_id:
+        logger.info("Token verification failed")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
@@ -54,6 +57,7 @@ async def get_current_user(
     
     # Get user from database
     user = await AuthService.get_user_by_id(session, user_id)
+    logger.info(f"Found user: {user.username if user else 'None'}")
     
     if not user:
         raise HTTPException(

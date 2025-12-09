@@ -137,9 +137,12 @@ class Session(Base):
     __tablename__ = "sessions"
     
     session_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    # session_id = Column(String(255), primary_key=True, default=lambda: str(uuid4()))
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     
+    # Title fields
+    title = Column(String(200), nullable=True)
+    is_title_user_defined = Column(Boolean, default=False)
+
     # Session info
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_activity_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -163,10 +166,11 @@ class Session(Base):
         Index("idx_session_user_id", "user_id"),
         Index("idx_session_last_activity", "last_activity_at"),
         Index("idx_session_is_active", "is_active"),
+        Index("idx_session_title", "title")
     )
     
     def __repr__(self):
-        return f"<Session(session_id={self.session_id}, user_id={self.user_id})>"
+        return f"<Session(session_id={self.session_id}, title={self.title} user_id={self.user_id})>"
 
 
 # ============================================

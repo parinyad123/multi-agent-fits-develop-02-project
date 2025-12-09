@@ -8,7 +8,7 @@ from datetime import datetime
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, func, update
 from sqlalchemy.orm import selectinload
 
 from app.db.models import ConversationMessage, WorkflowExecution, Session as SessionModel
@@ -352,3 +352,49 @@ class ConversationService:
         
         # logger.info(f"Created new session: {new_session_id}")
         # return str(new_session_id), True
+
+    @staticmethod
+    async def update_session_title(
+        session: AsyncSession,
+        session_id: str,
+        title: str,
+        is_user_defined: bool = False
+    ):
+        
+        """
+        Update session title
+
+        Args:
+            session: Database session
+            session_id: Session UUID (string or UUID)
+            title: Title string (max 200 chars)
+            is_user_defined: True if user manually set the title
+        """
+
+        try:
+            # Convert session_id to UUID
+            if isinstance(session_id, str):
+                session_id_uuid = UUID(session_id)
+            else:
+                session_id_uuid = session_id
+
+            # Update title
+            stmt = (
+                update(SessionModel)
+                .where(SessionModel.session_id == session_id_uuid)
+                .values(
+                    title=title[:200],
+                    is_title_user_defined=is_user_defined
+                )
+            )
+
+            await session.execute(stmt)
+            await session.flush()
+
+            logger.info(
+                f"Session title updated: session={session_id}, "
+                f"title='{title}', user_defined={is_user_defined}"
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to update session title: {e}", exc_info=True)

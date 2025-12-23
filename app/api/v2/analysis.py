@@ -10,7 +10,6 @@ import asyncio
 from uuid import UUID
 from typing import Optional
 
-# ✅ แก้แค่บรรทัดนี้
 from app.db.base import get_async_session
 from app.db.models import User, Session as ChatSession, FITSFile, WorkflowExecution
 from app.core.auth import get_current_active_user, get_current_user_flexible
@@ -282,13 +281,13 @@ async def stream_workflow_status(
     """
 
     orchestrator = get_orchestrator()
-
+    
     # Check workflow exists
     workflow_status = await orchestrator.get_workflow_status(task_id)
-
+    
     if not workflow_status:
         raise HTTPException(
-            status_code=404,
+            status_code=404, 
             detail=f"Analysis not found: {task_id}"
         )
     
@@ -301,7 +300,7 @@ async def stream_workflow_status(
         request_user_id = user_request.get('user_id')
     else:
         request_user_id = getattr(user_request, 'user_id', None)
-
+    
     if not request_user_id:
         logger.error(f"Cannot extract user_id from workflow {task_id}")
         raise HTTPException(
@@ -332,19 +331,20 @@ async def stream_workflow_status(
         try:
             while retry_count < max_retries:
                 # Get current workflow status
-                workflow = await orchestrator.get_workflow_status(task_id)
+                workflow_status = await orchestrator.get_workflow_status(task_id)
                 
-                if not workflow:
+                if not workflow_status:
                     yield f"data: {json.dumps({'error': 'Workflow not found'})}\n\n"
                     break
                 
                 # Create lightweight status
                 current_status = {
-                    'task_id': workflow.task_id,
-                    'status': workflow.status,
-                    'progress': workflow.progress,
-                    'current_step': workflow.current_step,
-                    'error': workflow.error
+                    'task_id': workflow_status.task_id,
+                    'status': workflow_status.status,
+                    'progress': workflow_status.progress,
+                    'current_step': workflow_status.current_step,
+                    'error': workflow_status.error,
+                    'session_id': workflow_status.session_id
                 }
                 
                 # Only send if status changed
@@ -358,6 +358,7 @@ async def stream_workflow_status(
                     logger.info(
                         f"SSE stream ended: task={task_id}, "
                         f"status={workflow_status.status}, "
+                        f"session={workflow_status.session_id}, "  # log session_id
                         f"user={current_user.username}"
                     )
                     break
@@ -371,7 +372,7 @@ async def stream_workflow_status(
                 yield f"data: {json.dumps({'error': 'Stream timeout', 'status': 'timeout'})}\n\n"
                 
         except asyncio.CancelledError:
-            logger.info(f"SSE stream cancelled: task={task_id}")
+            logger.info(f"SSE stream cancelled: task={task_id}, user={current_user.username}")
         except Exception as e:
             logger.error(f"Error in SSE stream: {e}", exc_info=True)
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -382,7 +383,7 @@ async def stream_workflow_status(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"  # Disable nginx buffering
+            "X-Accel-Buffering": "no"
         }
     )
 

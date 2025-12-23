@@ -1,16 +1,16 @@
 """
 Authentication API Routes
-Minimal auth endpoints
+Minimal auth endpoints with Cookie support
 
 app/api/v1/auth/routes.py
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import get_async_session
 from app.services.auth import AuthService
-from app.core.auth import get_current_active_user
+from app.core.auth import get_current_active_user, get_current_user_flexible
 from app.api.v1.auth.schemas import (
     RegisterRequest,
     LoginRequest,
@@ -81,13 +81,37 @@ async def register(
 )
 async def login(
     request: LoginRequest,
-    session: AsyncSession = Depends(get_async_session)
+    response: Response,
+    session: AsyncSession = Depends(get_async_session),
+    set_cookie: bool = Query(
+        True,
+        description="Set HTTP-only cookie (for browsers). Set false for Postman/API clients."
+    )
 ):
     """
-    Login to get access token
+    Login with flexible authentication
     
     - **username**: Username
     - **password**: User password
+    
+    **Cookie Behavior:**
+    - `set_cookie=true` (default): Sets HTTP-only cookie for browsers
+    - `set_cookie=false`: Only returns token (for Postman/API clients)
+    
+    **Browser usage:**
+    ```javascript
+        fetch('/auth/login', {
+            method: 'POST',
+            credentials: 'include',  // Auto-send cookie
+            body: JSON.stringify({username, password})
+        });
+    ```
+    
+    **Postman usage:**
+    ```
+        POST /auth/login?set_cookie=false
+        Authorization: Bearer <use_returned_token>
+    ```
     
     Returns JWT access token valid for 8 hours
     """
@@ -109,6 +133,23 @@ async def login(
         
         # Create access token
         access_token = AuthService.create_access_token(user.user_id)
+
+        # Calculate expiration
+        expires_seconds = settings.access_token_expire_hours * 3600
+
+        # Set HTTP-only cookie (if requested)
+        if set_cookie:
+            response.set_cookie(
+                key="access_token",
+                value=access_token,
+                httponly=True,  # Protect Javascript access (XSS protection)
+                secure=False,   # use True for production (HTTPS only)
+                max_age=expires_seconds,
+                path="/"
+            )
+            logger.info(f"Cookie set for user: {user.username}")
+        else:
+            logger.info(f"Token-only mode for user: {user.username}")
         
         await session.commit()
         
@@ -117,7 +158,7 @@ async def login(
         return TokenResponse(
             access_token=access_token,
             token_type="bearer",
-            expires_in=settings.access_token_expire_hours * 3600  # Convert to seconds
+            expires_in=expires_seconds
         )
         
     except HTTPException:
@@ -137,12 +178,14 @@ async def login(
     description="Get information about the currently authenticated user"
 )
 async def get_me(
-    current_user = Depends(get_current_active_user)
+    current_user = Depends(get_current_user_flexible)
 ):
     """
     Get current user information
     
-    Requires authentication (Bearer token in Authorization header)
+    Requires authentication:
+    - Browser: Cookie (automatic)
+    - Postman/API: Bearer token in Authorization header
     """
     
     return current_user
@@ -152,22 +195,83 @@ async def get_me(
     "/logout",
     response_model=MessageResponse,
     summary="Logout",
-    description="Logout (client should delete token)"
+    description="Logout (deletes cookie and invalidates session)"
 )
 async def logout(
-    current_user = Depends(get_current_active_user)
+    response: Response,
+    current_user = Depends(get_current_user_flexible)
 ):
     """
     Logout current user
     
-    Note: Since we're using stateless JWT tokens, logout is handled client-side.
-    The client should delete the token from storage.
+    **For Browser:**
+    - Deletes HTTP-only cookie
+    - Client should also clear localStorage/sessionStorage
     
-    This endpoint is provided for consistency and future extensions.
+    **For API clients:**
+    - Returns success message
+    - Client should discard the token
+    
+    **Note:** JWT tokens are stateless, so server-side invalidation
+    is not possible without a token blacklist (future feature).
     """
     
-    logger.info(f"User logged out: {current_user.email}")
+    # Delete cookie
+    response.delete_cookie(
+        key="access_token",
+        path="/",
+        httponly=True,
+        secure=False,  # True in production
+        samesite="lax"
+    )
+    
+    logger.info(f"User logged out: {current_user.username}")
     
     return MessageResponse(
-        message="Logged out successfully. Please delete your token."
+        message="Logged out successfully. Cookie deleted and token invalidated."
+    )
+
+# Optional: Refresh token endpoint
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    summary="Refresh access token",
+    description="Get a new access token using current valid token"
+)
+async def refresh_token(
+    response: Response,
+    current_user = Depends(get_current_user_flexible)
+):
+    """
+    Refresh access token
+    
+    Generates new token and updates cookie (if cookie auth was used)
+    
+    **Usage:**
+    - Before token expires, call this endpoint
+    - New token will be returned and cookie updated
+    - Old token becomes invalid after expiration
+    """
+    
+    # Generate new token
+    new_token = AuthService.create_access_token(current_user.user_id)
+    expires_seconds = settings.access_token_expire_hours * 3600
+    
+    # Update cookie (always set for browsers)
+    response.set_cookie(
+        key="access_token",
+        value=new_token,
+        httponly=True,
+        secure=False,
+        samesite="lax",
+        max_age=expires_seconds,
+        path="/"
+    )
+    
+    logger.info(f"Token refreshed for user: {current_user.username}")
+    
+    return TokenResponse(
+        access_token=new_token,
+        token_type="bearer",
+        expires_in=expires_seconds
     )

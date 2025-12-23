@@ -13,7 +13,7 @@ from typing import Optional
 # ✅ แก้แค่บรรทัดนี้
 from app.db.base import get_async_session
 from app.db.models import User, Session as ChatSession, FITSFile, WorkflowExecution
-from app.core.auth import get_current_active_user  # ✅ ใช้จาก core.auth
+from app.core.auth import get_current_active_user, get_current_user_flexible
 from app.api.v2.models import (
     AnalyzeRequest,
     AnalyzeResponse,
@@ -83,7 +83,7 @@ async def submit_analysis(
                     detail=f"FITS file is invalid: {fits_file.validation_error}"
                 )
         
-        # ✅ Load or create session
+        # Load or create session
         session = None
         if request.session_id:
             try:
@@ -243,10 +243,17 @@ async def get_analysis_status_light(
 @router.get("/analyze/{task_id}/stream")
 async def stream_workflow_status(
     task_id: str,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_user_flexible)
 ):
     """
     Server-Sent Events (SSE) endpoint for real-time workflow updates.
+
+    **Authentication:**
+    - Browser: Cookie (automatic with withCredentials: true)
+    - Postman/API: Bearer token in Authorization header
+    
+    **Security:**
+    - Verifies user owns the workflow before streaming
     
     **Use for:**
     - Real-time progress without polling
@@ -254,18 +261,18 @@ async def stream_workflow_status(
     - Automatic completion detection
     
     **Connection:**
-```javascript
-    const eventSource = new EventSource('/api/v2/analyze/{task_id}/stream');
-    
-    eventSource.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        console.log('Status:', data.status, data.progress);
+    ```javascript
+        const eventSource = new EventSource('/api/v2/analyze/{task_id}/stream');
         
-        if (data.status === 'completed' || data.status === 'failed') {
-            eventSource.close();
-        }
-    };
-```
+        eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            console.log('Status:', data.status, data.progress);
+            
+            if (data.status === 'completed' || data.status === 'failed') {
+                eventSource.close();
+            }
+        };
+    ```
     
     **Updates sent when:**
     - Status changes
@@ -273,8 +280,51 @@ async def stream_workflow_status(
     - Step transitions
     - Completion or failure
     """
+
+    orchestrator = get_orchestrator()
+
+    # Check workflow exists
+    workflow_status = await orchestrator.get_workflow_status(task_id)
+
+    if not workflow_status:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Analysis not found: {task_id}"
+        )
+    
+    # Check ownweship (Avoid user A access workflow of user B)
+    workflow = await orchestrator._get_from_memory(task_id)
+    user_request = workflow.get('user_request')
+
+    # Extract user_id from user_re  quest (maybe dict or object)
+    if isinstance(user_request, dict):
+        request_user_id = user_request.get('user_id')
+    else:
+        request_user_id = getattr(user_request, 'user_id', None)
+
+    if not request_user_id:
+        logger.error(f"Cannot extract user_id from workflow {task_id}")
+        raise HTTPException(
+            status_code=500,
+            detail="Invalid workflow data"
+        )
+    
+    if str(request_user_id) != str(current_user.user_id):
+        logger.warning(
+            f"Access denied: User {current_user.user_id} tried to access "
+            f"workflow {task_id} owned by {request_user_id}"
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: You don't have permission to access this analysis"
+        )
+    
+    logger.info(
+        f"SSE stream started: task={task_id}, user={current_user.username}"
+    )
+    
+    # Start streaming (ownership verified)
     async def event_generator():
-        orchestrator = get_orchestrator()
         last_status = None
         retry_count = 0
         max_retries = 300  # 5 minutes at 1s intervals
@@ -304,8 +354,12 @@ async def stream_workflow_status(
                     retry_count = 0  # Reset on update
                 
                 # Stop streaming if completed or failed
-                if workflow.status in ['completed', 'failed']:
-                    logger.info(f"SSE stream ended: task={task_id}, status={workflow.status}")
+                if workflow_status.status in ['completed', 'failed']:
+                    logger.info(
+                        f"SSE stream ended: task={task_id}, "
+                        f"status={workflow_status.status}, "
+                        f"user={current_user.username}"
+                    )
                     break
                 
                 # Wait before next check

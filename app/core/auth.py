@@ -153,7 +153,7 @@ async def get_current_user_flexible(
             detail="User account is inactive"
         )
     
-    logger.info(f"✅ Authentication successful via {auth_method}: user={user.username} (id={user.user_id})")
+    logger.info(f"Authentication successful via {auth_method}: user={user.username} (id={user.user_id})")
     
     return user
 

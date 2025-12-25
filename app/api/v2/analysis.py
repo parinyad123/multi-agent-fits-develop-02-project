@@ -298,8 +298,10 @@ async def stream_workflow_status(
     # Extract user_id from user_re  quest (maybe dict or object)
     if isinstance(user_request, dict):
         request_user_id = user_request.get('user_id')
+        request_session_id = user_request.get('session_id') 
     else:
         request_user_id = getattr(user_request, 'user_id', None)
+        request_session_id = getattr(user_request, 'session_id', None)
     
     if not request_user_id:
         logger.error(f"Cannot extract user_id from workflow {task_id}")
@@ -319,7 +321,9 @@ async def stream_workflow_status(
         )
     
     logger.info(
-        f"SSE stream started: task={task_id}, user={current_user.username}"
+        f"SSE stream started: task={task_id}, "
+        f"session={request_session_id}, " 
+        f"user={current_user.username}"
     )
     
     # Start streaming (ownership verified)
@@ -344,7 +348,7 @@ async def stream_workflow_status(
                     'progress': workflow_status.progress,
                     'current_step': workflow_status.current_step,
                     'error': workflow_status.error,
-                    'session_id': workflow_status.session_id
+                    'session_id': request_session_id  
                 }
                 
                 # Only send if status changed
@@ -358,7 +362,7 @@ async def stream_workflow_status(
                     logger.info(
                         f"SSE stream ended: task={task_id}, "
                         f"status={workflow_status.status}, "
-                        f"session={workflow_status.session_id}, "  # log session_id
+                        f"session={request_session_id}, "
                         f"user={current_user.username}"
                     )
                     break

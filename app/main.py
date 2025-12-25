@@ -234,9 +234,14 @@ app.add_middleware(
 logger.info("✓ GZIP compression middleware added")
 
 # 2. CORS Configuration
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: Update in production
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://192.168.156.22:3000"
+        ],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

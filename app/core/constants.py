@@ -84,6 +84,13 @@ class PlotType(str, Enum):
 # ==================================
 # Model Names
 # ==================================
+# class ModelNames:
+#     """LLM model identifiers"""
+#     GPT4: Final[str] = "gtp-4"
+#     GPT35_TURBO: Final[str] = "gpt-3.5-turbo"
+#     ASTROSAGE_LLAMA31_8B: Final[str] = "AstroSage-Llama-3.1-8B"
+#     ASTROSAGE_LLAMA31_70B: Final[str] = "AstroSage-Llama-3.1-70B"
+
 class ModelNames:
     """LLM model identifiers — Groq-hosted models"""
     # Fast / cheap
@@ -115,6 +122,8 @@ class ResponseCode:
 # Resource Limits
 # ==================================
 class ResourceLimits:
+    # MAX_GPT_CONCURRENT: Final[int] = 3
+    # MAX_ASTROSAGE_CONCURRENT: Final[int] = 1
     MAX_GROQ_CONCURRENT: Final[int] = 5
     MAX_WORKFLOW_MEMORY: Final[int] = 100
     MAX_WORKER_CONCURRENT: Final[int] = 20
@@ -143,6 +152,7 @@ class ErrorMessages:
     ORCHESTRATOR_NOT_READY: Final[str] = "Orchestrator not initialized"
     INVALID_ROUTING_STRATEGY: Final[str] = "Invalid routing strategy: {}"
     ANALYSIS_FAILED: Final[str] = "Analysis failed: {}"
+    # ASTROSAGE_UNAVAILABLE: Final[str] = "AstroSage service unavailable"
     GROQ_UNAVAILABLE: Final[str] = "Groq service unavailable"
 
 

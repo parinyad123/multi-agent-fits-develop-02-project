@@ -92,8 +92,19 @@ class PlotType(str, Enum):
 #     ASTROSAGE_LLAMA31_70B: Final[str] = "AstroSage-Llama-3.1-70B"
 
 class ModelNames:
-    """LLM model identifiers — Groq-hosted models"""
-    # Fast / cheap
+    """LLM model identifiers"""
+
+    # ----------------------------------
+    # GPT-OSS  (OpenAI open-source / compatible)
+    # ----------------------------------
+    # High-quality for analysis interpretation — proven to work well
+    GPT_OSS_120B: Final[str] = "openai/gpt-oss-120b"
+    GPT_OSS_20B: Final[str] = "openai/gpt-oss-20b"
+
+    # ----------------------------------
+    # Groq-hosted Llama models
+    # ----------------------------------
+    # Fast / cheap — good for classification
     LLAMA31_8B: Final[str] = "llama-3.1-8b-instant"
     # Default workhorse
     LLAMA33_70B: Final[str] = "llama-3.3-70b-versatile"

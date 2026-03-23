@@ -1,5 +1,7 @@
 langchain==0.3.27
 langchain-community==0.3.30
 langchain-openai==0.3.34
+langchain-groq==0.3.8
+groq==0.37.1
 uvicorn==0.37.0
-fastapi==0.118.0 
+fastapi==0.118.0

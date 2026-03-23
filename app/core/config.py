@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Optional
 import secrets
 
+from app.core.constants import ModelNames
+
 
 class Settings(BaseSettings):
     """Application configuration settings loaded from environment variables."""
@@ -17,7 +19,8 @@ class Settings(BaseSettings):
     # ==========================================
     # API Keys
     # ==========================================
-    openai_api_key: str
+    openai_api_key: str = ""   # legacy — no longer required
+    groq_api_key: str = ""
 
     # ==========================================
     # Storage Directories (relative paths from .env)
@@ -44,24 +47,22 @@ class Settings(BaseSettings):
     database_pool_pre_ping: bool = True  # Verify connections before using
 
     # ==========================================
-    # Classification & parameter Agent
+    # Model per agent
     # ==========================================
-    # CLASSIFICATION_MODEL: str = "gpt-4o-mini"   # gpt-3.5-turbo, gpt-4o-mini
-    CLASSIFICATION_MODEL: str = "llama-3.3-70b-versatile"
+    # Classification agent  — needs structured JSON output, fast
+    CLASSIFICATION_MODEL: str = ModelNames.LLAMA33_70B
+
+    # Interpretation agent  — replaces AstroSage, needs deep reasoning
+    # gpt-oss works great here; fall back to ModelNames.LLAMA33_70B
+    INTERPRETATION_MODEL: str = ModelNames.GPT_OSS_120B
+
+    # Rewrite agent  — formats final response to user
+    REWRITE_MODEL: str = ModelNames.LLAMA33_70B
 
     # ==========================================
-    # AstroSage Service
+    # Groq Service (shared transport settings)
     # ==========================================
-    # astrosage_base_url: str = "http://192.168.156.22:8080"
-    # astrosage_model: str = "astrosage"
-    # astrosage_timeout: int = 240  # seconds
-    # astrosage_max_retries: int = 3
-    # astrosage_retry_delay: int = 5  # seconds
-
-    # ==========================================
-    # Groq Service
-    # ==========================================
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = ModelNames.LLAMA33_70B  # default fallback
     groq_timeout: int = 60   # seconds
     groq_max_retries: int = 3
     groq_retry_delay: int = 5  # seconds
@@ -74,9 +75,6 @@ class Settings(BaseSettings):
     # ==========================================
     # Default LLM Parameters
     # ==========================================
-    # astrosage_default_temperature: float = 0.2
-    # astrosage_default_max_tokens: int = 600
-    # astrosage_default_top_p: float = 0.95
     groq_default_temperature: float = 0.2
     groq_default_max_tokens: int = 4096
 

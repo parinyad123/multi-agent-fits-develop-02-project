@@ -46,16 +46,25 @@ class Settings(BaseSettings):
     # ==========================================
     # Classification & parameter Agent
     # ==========================================
-    CLASSIFICATION_MODEL: str = "gpt-4o-mini"   # gpt-3.5-turbo, gpt-4o-mini
+    # CLASSIFICATION_MODEL: str = "gpt-4o-mini"   # gpt-3.5-turbo, gpt-4o-mini
+    CLASSIFICATION_MODEL: str = "llama-3.3-70b-versatile"
 
     # ==========================================
     # AstroSage Service
     # ==========================================
-    astrosage_base_url: str = "http://192.168.156.22:8080"
-    astrosage_model: str = "astrosage"
-    astrosage_timeout: int = 240  # seconds
-    astrosage_max_retries: int = 3
-    astrosage_retry_delay: int = 5  # seconds
+    # astrosage_base_url: str = "http://192.168.156.22:8080"
+    # astrosage_model: str = "astrosage"
+    # astrosage_timeout: int = 240  # seconds
+    # astrosage_max_retries: int = 3
+    # astrosage_retry_delay: int = 5  # seconds
+
+    # ==========================================
+    # Groq Service
+    # ==========================================
+    groq_model: str = "llama-3.3-70b-versatile"
+    groq_timeout: int = 60   # seconds
+    groq_max_retries: int = 3
+    groq_retry_delay: int = 5  # seconds
 
     # ==========================================
     # Conversation Settings
@@ -65,9 +74,11 @@ class Settings(BaseSettings):
     # ==========================================
     # Default LLM Parameters
     # ==========================================
-    astrosage_default_temperature: float = 0.2
-    astrosage_default_max_tokens: int = 600
-    astrosage_default_top_p: float = 0.95
+    # astrosage_default_temperature: float = 0.2
+    # astrosage_default_max_tokens: int = 600
+    # astrosage_default_top_p: float = 0.95
+    groq_default_temperature: float = 0.2
+    groq_default_max_tokens: int = 4096
 
     # ==========================================
     # Rewrite Agent Configuration

@@ -13,7 +13,7 @@ class AgentNames:
     """Agent identifiers for registration and routing"""
     CLASSIFICATION: Final[str] = "classification_parameter_agent"
     ANALYSIS: Final[str] = "analysis_agent"
-    ASTROSAGE: Final[str] = "astrosage_client"
+    GROQ: Final[str] = "groq_client"
     REWRITE: Final[str] = "rewrite_agent"
 
     @classmethod
@@ -22,7 +22,7 @@ class AgentNames:
         return [
             cls.CLASSIFICATION,
             cls.ANALYSIS,
-            cls.ASTROSAGE,
+            cls.GROQ,
             cls.REWRITE
         ]
 
@@ -36,9 +36,9 @@ class AgentNames:
 # ==================================
 class RoutingStrategy(str, Enum):
     """Workflow routing strategies"""
-    ASTROSAGE = "astrosage"         # Classification → AstroSage → Rewrite
+    GROQ = "groq"                   # Classification → Groq → Rewrite
     ANALYSIS = "analysis"           # Classification → Analysis → Rewrite
-    MIXED = "mixed"                 # Classification → Analysis → AstroSage → Rewrite
+    MIXED = "mixed"                 # Classification → Analysis → Groq → Rewrite
 
 
 # ==================================
@@ -85,11 +85,15 @@ class PlotType(str, Enum):
 # Model Names
 # ==================================
 class ModelNames:
-    """LLM model identifiers"""
-    GPT4: Final[str] = "gtp-4"
-    GPT35_TURBO: Final[str] = "gpt-3.5-turbo"
-    ASTROSAGE_LLAMA31_8B: Final[str] = "AstroSage-Llama-3.1-8B"
-    ASTROSAGE_LLAMA31_70B: Final[str] = "AstroSage-Llama-3.1-70B"
+    """LLM model identifiers — Groq-hosted models"""
+    # Fast / cheap
+    LLAMA31_8B: Final[str] = "llama-3.1-8b-instant"
+    # Default workhorse
+    LLAMA33_70B: Final[str] = "llama-3.3-70b-versatile"
+    # High-capacity
+    LLAMA31_70B: Final[str] = "llama-3.1-70b-versatile"
+    # Tool-use capable
+    LLAMA3_GROQ_70B: Final[str] = "llama3-groq-70b-8192-tool-use-preview"
 
 # ==================================
 # API Pesponse Codes
@@ -111,12 +115,11 @@ class ResponseCode:
 # Resource Limits
 # ==================================
 class ResourceLimits:
-    MAX_GPT_CONCURRENT: Final[int] = 3
-    MAX_ASTROSAGE_CONCURRENT: Final[int] = 1
+    MAX_GROQ_CONCURRENT: Final[int] = 5
     MAX_WORKFLOW_MEMORY: Final[int] = 100
     MAX_WORKER_CONCURRENT: Final[int] = 20
     MAX_FILE_SIZE_MB: Final[int] = 512
-    MAX_UPLOAD_SIZE_BYTES: Final[int] = 10_240 # 10 MB
+    MAX_UPLOAD_SIZE_BYTES: Final[int] = 10_240  # 10 MB
 
 
 # ==================================
@@ -140,7 +143,7 @@ class ErrorMessages:
     ORCHESTRATOR_NOT_READY: Final[str] = "Orchestrator not initialized"
     INVALID_ROUTING_STRATEGY: Final[str] = "Invalid routing strategy: {}"
     ANALYSIS_FAILED: Final[str] = "Analysis failed: {}"
-    ASTROSAGE_UNAVAILABLE: Final[str] = "AstroSage service unavailable"
+    GROQ_UNAVAILABLE: Final[str] = "Groq service unavailable"
 
 
 class TimeConstants:

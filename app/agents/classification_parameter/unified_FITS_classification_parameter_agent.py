@@ -19,13 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 # LangChain imports
-try:
-    from langchain_openai import ChatOpenAI
-except ImportError:
-    from langchain.chat_models import ChatOpenAI
-
+from langchain_groq import ChatGroq
 from langchain.schema import HumanMessage, SystemMessage
-from langchain_community.callbacks.manager import get_openai_callback
 
 from app.services.conversation_history_service import (
     ConversationHistoryService,
@@ -86,19 +81,19 @@ class UnifiedFITSClassificationAgent:
     FIXED: Enhanced mixed request detection for astrophysics interpretation
     """
     
-    def __init__(self, 
-                 model_name: str = "gpt-4o-mini", 
+    def __init__(self,
+                 model_name: str = settings.groq_model,
                  temperature: float = 0.1,
                  max_tokens: int = 1500):
         self.name = "UnifiedFITSAgent_v2.2"
         self.logger = logging.getLogger(f"agent.{self.name}")
-        
+
         # Initialize LLM
-        self.llm = ChatOpenAI(
+        self.llm = ChatGroq(
             model=model_name,
             temperature=temperature,
             max_tokens=max_tokens,
-            request_timeout=30
+            api_key=settings.groq_api_key
         )
         
         # Parameter schemas
@@ -521,22 +516,27 @@ class UnifiedFITSClassificationAgent:
             full_prompt = self._build_unified_prompt(user_input, context, history_context)
             
             # LLM call
-            with get_openai_callback() as cb:
-                messages = [
-                    SystemMessage(content=self.system_prompt),
-                    HumanMessage(content=full_prompt)
-                ]
-                
-                response = await self.llm.agenerate([messages])
-                raw_output = response.generations[0][0].text.strip()
-                
-                self.logger.debug(f"RAW OUTPUT:\n{raw_output[:500]}...")
-                
-                tokens_used = cb.total_tokens if hasattr(cb, 'total_tokens') else 0
-                cost = cb.total_cost if hasattr(cb, 'total_cost') else tokens_used * 0.000002
-                
-                self.stats["total_tokens"] += tokens_used
-                self.stats["total_cost"] += cost
+            messages = [
+                SystemMessage(content=self.system_prompt),
+                HumanMessage(content=full_prompt)
+            ]
+
+            response = await self.llm.agenerate([messages])
+            raw_output = response.generations[0][0].text.strip()
+
+            self.logger.debug(f"RAW OUTPUT:\n{raw_output[:500]}...")
+
+            # Extract token usage from Groq response
+            token_usage = (
+                response.llm_output.get("token_usage", {})
+                if response.llm_output else {}
+            )
+            tokens_used = token_usage.get("total_tokens", 0)
+            # llama-3.3-70b pricing: ~$0.59/1M tokens
+            cost = tokens_used * 0.00000059
+
+            self.stats["total_tokens"] += tokens_used
+            self.stats["total_cost"] += cost
             
             # Parse response
             result = self._parse_unified_response(raw_output)
